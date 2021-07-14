@@ -9,8 +9,10 @@ import (
 )
 
 var (
-	ErrorUndefinedChannel = errors.New("channel is undefined")
-	ErrorIncorrectVersion = errors.New("parse version variant err")
+	ErrorUndefinedChannel                 = errors.New("channel is undefined")
+	ErrorVersionParseErrNumericPreRelease = errors.New("version parse err: numeric pre-release branches are unsupported")
+	ErrorVersionParseErrNoChannel         = errors.New("version parse err: can't find channel")
+	ErrorVersionInvalid                   = errors.New("version is invalid")
 )
 
 type Version interface {
@@ -22,6 +24,9 @@ func getLatestVersion(cfg applicationConfig, versions []Version) (*Version, *int
 	maxVersionIndex := -1
 	maxVersion := prepareVersionForComparison(cfg.currentVersion.getChannel(), cfg.currentVersion.getVersion())
 	for i := 0; i < len(versions); i++ {
+		if !versions[i].getChannel().useForUpdate {
+			continue
+		}
 		prepVersion := prepareVersionForComparison(versions[i].getChannel(), versions[i].getVersion())
 		if prepVersion.Compare(maxVersion) == 1 {
 			maxVersionIndex = i
@@ -36,7 +41,7 @@ func getLatestVersion(cfg applicationConfig, versions []Version) (*Version, *int
 
 func prepareVersionForComparison(channel Channel, version semver.Version) semver.Version {
 	if len(version.Pre) > 0 {
-		version.Pre[0].VersionNum = uint64(channel.Weight)
+		version.Pre[0].VersionNum = uint64(channel.weight)
 		version.Pre[0].VersionStr = ""
 		version.Pre[0].IsNum = true
 	}
@@ -47,26 +52,28 @@ func prepareVersionString(version string) string {
 	return strings.TrimLeft(strings.TrimSpace(version), "v")
 }
 
-func parseVersion(appConf applicationConfig, version string) (*semver.Version, *Channel, error) {
+func parseVersion(cfg applicationConfig, version string) (*semver.Version, *Channel, error) {
 	version = prepareVersionString(version)
 	parsedVersion, err := semver.Parse(version)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(parsedVersion.Pre) == 0 && appConf.isReleaseChanelAvailable() {
-		rChan := GetReleaseChanel()
-		return &parsedVersion, &rChan, nil
+	if len(parsedVersion.Pre) == 0 {
+		rChan := cfg.getReleaseChannel()
+		if rChan != nil {
+			return &parsedVersion, rChan, nil
+		}
+		return &parsedVersion, nil, ErrorVersionParseErrNoChannel
 	}
 	if parsedVersion.Pre[0].IsNum {
-		return &parsedVersion, nil, errors.New("version parse err numeric pre-release branches are unsupported") //TODO NOTICE NOT ERR
+		return &parsedVersion, nil, ErrorVersionParseErrNumericPreRelease
 	}
-	for _, channel := range appConf.channels {
+	for _, channel := range cfg.channels {
 		if channel.Name == parsedVersion.Pre[0].VersionStr {
 			return &parsedVersion, &channel, nil
 		}
 	}
-	// when compare change pre[0] to priority val, ONLY POSITIVE
-	return &parsedVersion, nil, nil
+	return &parsedVersion, nil, ErrorVersionParseErrNoChannel
 }
 
 type gitAssets struct {
@@ -91,32 +98,28 @@ type versionGit struct {
 	version semver.Version
 }
 
-func newVersionGit(cfg applicationConfig, data gitData) *versionGit {
+func newVersionGit(cfg applicationConfig, data gitData) (*versionGit, error) {
 	vG := &versionGit{
 		data: data,
 	}
 	if !vG.isValid(cfg) {
-		return nil
+		return nil, ErrorVersionInvalid
 	}
 	version, channel, err := parseVersion(cfg, data.version)
-	if channel == nil || err != nil {
-		return nil
+	if err != nil {
+		return nil, err
 	}
 	vG.version = *version
 	vG.channel = *channel
-	return vG
+	return vG, nil
 }
 
 func (vG *versionGit) isValid(cfg applicationConfig) bool {
 	release := true
 	if vG.data.prerelease {
-		release = !cfg.isReleaseChanelOnlyMod()
+		release = !cfg.isReleaseChannelOnlyMod()
 	}
 	return !vG.data.draft && release
-}
-
-func (vG *versionGit) GetVersion() string {
-	return vG.version.String()
 }
 
 func (vG *versionGit) getVersion() semver.Version {
@@ -132,8 +135,8 @@ type versionCurrent struct {
 	version semver.Version
 }
 
-func newVersionCurrent(appConf applicationConfig, version string) (*versionCurrent, error) {
-	pVersion, channel, err := parseVersion(appConf, version)
+func newVersionCurrent(cfg applicationConfig, version string) (*versionCurrent, error) {
+	pVersion, channel, err := parseVersion(cfg, version)
 	if err != nil {
 		return nil, err
 	}
@@ -141,15 +144,10 @@ func newVersionCurrent(appConf applicationConfig, version string) (*versionCurre
 		version: *pVersion,
 	}
 	if channel == nil {
-		curVer.channel = Channel{Weight: 0}
-		return curVer, ErrorUndefinedChannel // TODO notice not err
+		return nil, ErrorUndefinedChannel
 	}
 	curVer.channel = *channel
 	return curVer, nil
-}
-
-func (vC *versionCurrent) GetVersion() string {
-	return vC.version.String()
 }
 
 func (vC *versionCurrent) getVersion() semver.Version {

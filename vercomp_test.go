@@ -32,7 +32,7 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 	}
 	versions := make([]Version, 0)
 	for _, vTest := range versionTests {
-		ver := newVersionGit(*cfg, gitData{
+		ver, _ := newVersionGit(*cfg, gitData{
 			version: vTest.version,
 		})
 		if ver == nil {
@@ -118,12 +118,12 @@ func TestVersionComparisonReleaseOnly(t *testing.T) {
 		},
 	}
 	channels := []Channel{
-		GetReleaseChanel(),
+		GetReleaseChanel(true),
 	}
 	testLatestVersionSearch(versionTest{version: "1.0.0", isMaxVersion: false}, channels, versionTests, t)
 }
 
-func TestVersionComparisonRelDebug1(t *testing.T) {
+func TestVersionComparisonRelDev1(t *testing.T) {
 	versionTests := []versionTest{
 		{
 			version:      "1.0.1",
@@ -131,13 +131,13 @@ func TestVersionComparisonRelDebug1(t *testing.T) {
 		},
 	}
 	channels := []Channel{
-		GetReleaseChanel(),
-		GetDevChanel(),
+		GetReleaseChanel(true),
+		GetDevChanel(true),
 	}
 	testLatestVersionSearch(versionTest{version: "1.0.1-dev.1", isMaxVersion: false}, channels, versionTests, t)
 }
 
-func TestVersionComparisonRelDebug2(t *testing.T) {
+func TestVersionComparisonRelDev2(t *testing.T) {
 	versionTests := []versionTest{
 		{
 			version:      "1.0.1-dev.0.1",
@@ -157,10 +157,36 @@ func TestVersionComparisonRelDebug2(t *testing.T) {
 		},
 	}
 	channels := []Channel{
-		GetReleaseChanel(),
-		GetDevChanel(),
+		GetReleaseChanel(true),
+		GetDevChanel(true),
 	}
 	testLatestVersionSearch(versionTest{version: "1.0.1-dev.1.5", isMaxVersion: true}, channels, versionTests, t)
+}
+
+func TestVersionComparisonRelDev3(t *testing.T) {
+	versionTests := []versionTest{
+		{
+			version:      "1.0.1-dev.0.1",
+			isMaxVersion: false,
+		},
+		{
+			version:      "1.0.1-dev.1.5",
+			isMaxVersion: false,
+		},
+		{
+			version:      "1.0.0",
+			isMaxVersion: false,
+		},
+		{
+			version:      "1.0.1-dev.0.9",
+			isMaxVersion: false,
+		},
+	}
+	channels := []Channel{
+		GetReleaseChanel(true),
+		GetDevChanel(false),
+	}
+	testLatestVersionSearch(versionTest{version: "1.0.1-dev.1.4", isMaxVersion: true}, channels, versionTests, t)
 }
 
 func TestVersionComparisonMultiChan(t *testing.T) {
@@ -179,10 +205,10 @@ func TestVersionComparisonMultiChan(t *testing.T) {
 		},
 	}
 	channels := []Channel{
-		GetReleaseChanel(),
-		GetDevChanel(),
-		GetAlphaChanel(),
-		GetBetaChanel(),
+		GetReleaseChanel(true),
+		GetBetaChanel(true),
+		GetAlphaChanel(true),
+		GetDevChanel(true),
 	}
 	testLatestVersionSearch(versionTest{version: "1.0.0", isMaxVersion: false}, channels, versionTests, t)
 }

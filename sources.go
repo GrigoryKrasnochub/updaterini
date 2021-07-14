@@ -9,15 +9,12 @@ import (
 	"time"
 )
 
-/*
-	getSourceVersions() return parsed and filtered versions
-*/
 type UpdateSource interface {
-	getSourceVersions(appConfig applicationConfig) ([]Version, error)
+	getSourceVersions(cfg applicationConfig) ([]Version, error)
 }
 
 type UpdateSourceUrl interface {
-	getSourceUrl(config applicationConfig) string
+	getSourceUrl(cfg applicationConfig) string
 }
 
 type UpdateSourceGitRepo struct {
@@ -25,16 +22,16 @@ type UpdateSourceGitRepo struct {
 	RepoName string
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceUrl(config applicationConfig) string {
+func (sGit *UpdateSourceGitRepo) getSourceUrl(cfg applicationConfig) string {
 	link := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", sGit.UserName, sGit.RepoName)
-	if config.isReleaseChanelOnlyMod() {
+	if cfg.isReleaseChannelOnlyMod() {
 		link += "/latest"
 	}
 	return link
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceVersions(appConfig applicationConfig) ([]Version, error) {
-	resp, err := doSourceRequest(sGit, appConfig)
+func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Version, error) {
+	resp, err := doSourceRequest(sGit, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -43,20 +40,25 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(appConfig applicationConfig) 
 	}()
 	jD := json.NewDecoder(resp.Body)
 	var data []gitData
-	if appConfig.isReleaseChanelOnlyMod() {
+	if cfg.isReleaseChannelOnlyMod() {
 		var tmpData gitData
 		err = jD.Decode(&tmpData)
 		data = append(data, tmpData)
 	} else {
 		err = jD.Decode(&data)
 	}
+	if err != nil {
+		return nil, err
+	}
 	var resultVersions []Version
 	for _, gData := range data {
-		if gVersion := newVersionGit(appConfig, gData); gVersion != nil && gVersion.isValid(appConfig) {
-			resultVersions = append(resultVersions, gVersion)
+		gVersion, err := newVersionGit(cfg, gData)
+		if cfg.ShowPrepareVersionErr && err != nil {
+			return nil, err
 		}
+		resultVersions = append(resultVersions, gVersion)
 	}
-	return resultVersions, err
+	return resultVersions, nil
 }
 
 const readTimeout = 30 * time.Minute
@@ -75,7 +77,7 @@ func doSourceRequest(usu UpdateSourceUrl, appConfig applicationConfig) (*http.Re
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", fmt.Sprintf(`updaterini %s (%s %s-%s)`, appConfig.currentVersion.GetVersion(), runtime.Version(), runtime.GOOS, runtime.GOARCH))
+	req.Header.Set("User-Agent", fmt.Sprintf(`updaterini %s (%s %s-%s)`, appConfig.currentVersion.getVersion().String(), runtime.Version(), runtime.GOOS, runtime.GOARCH))
 	resp, err := insecureHTTP.Do(req)
 	if err != nil {
 		fmt.Println(err.Error())
