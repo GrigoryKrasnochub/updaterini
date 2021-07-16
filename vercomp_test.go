@@ -12,7 +12,6 @@ type versionTest struct {
 }
 
 func testLatestVersionSearch(curVersion versionTest, channels []Channel, versionTests []versionTest, t *testing.T) {
-	// bad test check
 	maxVersionsCounter := 0
 	if curVersion.isMaxVersion {
 		maxVersionsCounter += 1
@@ -30,10 +29,13 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 	if err != nil {
 		t.Errorf("creating new version err: %s", err)
 	}
-	versions := make([]Version, 0)
+	versions := make([]version, 0)
 	for _, vTest := range versionTests {
 		ver, _ := newVersionGit(*cfg, gitData{
-			version: vTest.version,
+			Version: vTest.version,
+		}, UpdateSourceGitRepo{
+			UserName: "",
+			RepoName: "",
 		})
 		if ver == nil {
 			continue

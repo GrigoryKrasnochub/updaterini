@@ -2,6 +2,10 @@ package updaterini
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -13,14 +17,21 @@ var (
 	ErrorVersionParseErrNumericPreRelease = errors.New("version parse err: numeric pre-release branches are unsupported")
 	ErrorVersionParseErrNoChannel         = errors.New("version parse err: can't find channel")
 	ErrorVersionInvalid                   = errors.New("version is invalid")
+
+	ValidFileNameRegex = regexp.MustCompile(fmt.Sprintf(".*%s_%s.*", runtime.GOOS, runtime.GOARCH))
 )
 
-type Version interface {
-	getVersion() semver.Version
-	getChannel() Channel
+func isVersionFilenameCorrect(filename string) bool {
+	return ValidFileNameRegex.MatchString(filename)
 }
 
-func getLatestVersion(cfg applicationConfig, versions []Version) (*Version, *int) {
+type version interface {
+	getVersion() semver.Version
+	getChannel() Channel
+	getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error
+}
+
+func getLatestVersion(cfg applicationConfig, versions []version) (*version, *int) {
 	maxVersionIndex := -1
 	maxVersion := prepareVersionForComparison(cfg.currentVersion.getChannel(), cfg.currentVersion.getVersion())
 	for i := 0; i < len(versions); i++ {
@@ -77,49 +88,69 @@ func parseVersion(cfg applicationConfig, version string) (*semver.Version, *Chan
 }
 
 type gitAssets struct {
-	size int
-	id   int
-	url  string `json:"browser_download_url"`
+	Size     int
+	Id       int
+	Filename string `json:"name"`
+	Url      string `json:"browser_download_url"`
 }
 
 type gitData struct {
-	prerelease  bool      `json:"prerelease"`
-	draft       bool      `json:"draft"`
-	name        string    `json:"name"`
-	releaseDate time.Time `json:"published_at"`
-	description string    `json:"body"`
-	version     string    `json:"tag_name"`
-	assets      []gitAssets
+	Prerelease  bool        `json:"prerelease"`
+	Draft       bool        `json:"draft"`
+	Name        string      `json:"name"`
+	ReleaseDate time.Time   `json:"published_at"`
+	Description string      `json:"body"`
+	Version     string      `json:"tag_name"`
+	Assets      []gitAssets `json:"assets"`
 }
 
 type versionGit struct {
 	data    gitData
 	channel Channel
+	source  UpdateSourceGitRepo
 	version semver.Version
 }
 
-func newVersionGit(cfg applicationConfig, data gitData) (*versionGit, error) {
+func newVersionGit(cfg applicationConfig, data gitData, src UpdateSourceGitRepo) (*versionGit, error) {
 	vG := &versionGit{
 		data: data,
 	}
 	if !vG.isValid(cfg) {
 		return nil, ErrorVersionInvalid
 	}
-	version, channel, err := parseVersion(cfg, data.version)
+	vG.cleanUnusedAssets()
+	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
 		return nil, err
 	}
 	vG.version = *version
 	vG.channel = *channel
+	vG.source = src
 	return vG, nil
 }
 
 func (vG *versionGit) isValid(cfg applicationConfig) bool {
 	release := true
-	if vG.data.prerelease {
+	if vG.data.Prerelease {
 		release = !cfg.isReleaseChannelOnlyMod()
 	}
-	return !vG.data.draft && release
+	files := false
+	for _, gitAsset := range vG.data.Assets {
+		if isVersionFilenameCorrect(gitAsset.Filename) {
+			files = true
+		}
+	}
+	return !vG.data.Draft && release && files
+}
+
+func (vG *versionGit) cleanUnusedAssets() {
+	var cleanAssets []gitAssets
+	for _, gitAsset := range vG.data.Assets {
+		if isVersionFilenameCorrect(gitAsset.Filename) {
+			cleanAssets = append(cleanAssets, gitAsset)
+		}
+	}
+	vG.data.Assets = cleanAssets
 }
 
 func (vG *versionGit) getVersion() semver.Version {
@@ -128,6 +159,24 @@ func (vG *versionGit) getVersion() semver.Version {
 
 func (vG *versionGit) getChannel() Channel {
 	return vG.channel
+}
+
+func (vG *versionGit) getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
+	for _, asset := range vG.data.Assets {
+		reader, err := vG.source.loadSourceFile(cfg, asset.Id)
+		if err != nil {
+			return err
+		}
+		err = processFileContent(reader, asset.Filename)
+		if err != nil {
+			return err
+		}
+		err = reader.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type versionCurrent struct {
@@ -156,4 +205,8 @@ func (vC *versionCurrent) getVersion() semver.Version {
 
 func (vC *versionCurrent) getChannel() Channel {
 	return vC.channel
+}
+
+func (vC *versionCurrent) getAssetsFilesContent(applicationConfig, func(reader io.Reader, filename string) error) error {
+	return nil
 }

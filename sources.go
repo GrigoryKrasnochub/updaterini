@@ -4,17 +4,14 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
 	"time"
 )
 
 type UpdateSource interface {
-	getSourceVersions(cfg applicationConfig) ([]Version, error)
-}
-
-type UpdateSourceUrl interface {
-	getSourceUrl(cfg applicationConfig) string
+	getSourceVersions(cfg applicationConfig) ([]version, error)
 }
 
 type UpdateSourceGitRepo struct {
@@ -30,13 +27,20 @@ func (sGit *UpdateSourceGitRepo) getSourceUrl(cfg applicationConfig) string {
 	return link
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Version, error) {
-	resp, err := doSourceRequest(sGit, cfg)
+func (sGit *UpdateSourceGitRepo) getLoadFileUrl(fileId int) string {
+	link := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/assets/%d", sGit.UserName, sGit.RepoName, fileId)
+	return link
+}
+
+func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]version, error) {
+	resp, err := doGetRequest(sGit.getSourceUrl(cfg), cfg, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
-		err = resp.Body.Close()
+		if resp != nil {
+			err = resp.Body.Close()
+		}
 	}()
 	jD := json.NewDecoder(resp.Body)
 	var data []gitData
@@ -50,15 +54,27 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Ver
 	if err != nil {
 		return nil, err
 	}
-	var resultVersions []Version
+	var resultVersions []version
 	for _, gData := range data {
-		gVersion, err := newVersionGit(cfg, gData)
-		if cfg.ShowPrepareVersionErr && err != nil {
-			return nil, err
+		gVersion, err := newVersionGit(cfg, gData, *sGit)
+		if err != nil {
+			if cfg.ShowPrepareVersionErr {
+				return nil, err
+			}
+			continue
 		}
 		resultVersions = append(resultVersions, gVersion)
 	}
 	return resultVersions, nil
+}
+
+func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg applicationConfig, fileId int) (io.ReadCloser, error) {
+	resp, err := doGetRequest(sGit.getLoadFileUrl(fileId), cfg, map[string]string{"Accept": "application/octet-stream"},
+		map[int]interface{}{200: struct{}{}, 302: struct{}{}})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
 }
 
 const readTimeout = 30 * time.Minute
@@ -72,19 +88,20 @@ var insecureHTTP = &http.Client{
 	},
 }
 
-func doSourceRequest(usu UpdateSourceUrl, appConfig applicationConfig) (*http.Response, error) {
-	req, err := http.NewRequest("GET", usu.getSourceUrl(appConfig), nil)
+func doGetRequest(url string, appConfig applicationConfig, customHeaders map[string]string, okCodes map[int]interface{}) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", fmt.Sprintf(`updaterini %s (%s %s-%s)`, appConfig.currentVersion.getVersion().String(), runtime.Version(), runtime.GOOS, runtime.GOARCH))
+	for key, customHeader := range customHeaders {
+		req.Header.Set(key, customHeader)
+	}
 	resp, err := insecureHTTP.Do(req)
 	if err != nil {
-		fmt.Println(err.Error())
 		return nil, err
 	}
-	if resp.StatusCode != 200 {
-		fmt.Println("HTTP error:", resp.Status)
+	if _, ok := okCodes[resp.StatusCode]; !(len(okCodes) == 0 && resp.StatusCode == 200) && !ok {
 		return nil, err
 	}
 	return resp, nil
