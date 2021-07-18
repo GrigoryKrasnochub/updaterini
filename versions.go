@@ -25,13 +25,13 @@ func isVersionFilenameCorrect(filename string) bool {
 	return ValidFileNameRegex.MatchString(filename)
 }
 
-type version interface {
+type Version interface {
 	getVersion() semver.Version
 	getChannel() Channel
 	getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error
 }
 
-func getLatestVersion(cfg applicationConfig, versions []version) (*version, *int) {
+func getLatestVersion(cfg applicationConfig, versions []Version) (*Version, *int) {
 	maxVersionIndex := -1
 	maxVersion := prepareVersionForComparison(cfg.currentVersion.getChannel(), cfg.currentVersion.getVersion())
 	for i := 0; i < len(versions); i++ {
@@ -138,6 +138,7 @@ func (vG *versionGit) isValid(cfg applicationConfig) bool {
 	for _, gitAsset := range vG.data.Assets {
 		if isVersionFilenameCorrect(gitAsset.Filename) {
 			files = true
+			break
 		}
 	}
 	return !vG.data.Draft && release && files

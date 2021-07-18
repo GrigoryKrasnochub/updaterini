@@ -29,7 +29,7 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 	if err != nil {
 		t.Errorf("creating new version err: %s", err)
 	}
-	versions := make([]version, 0)
+	versions := make([]Version, 0)
 	for _, vTest := range versionTests {
 		ver, _ := newVersionGit(*cfg, gitData{
 			Version: vTest.version,

@@ -11,7 +11,7 @@ import (
 )
 
 type UpdateSource interface {
-	getSourceVersions(cfg applicationConfig) ([]version, error)
+	getSourceVersions(cfg applicationConfig) ([]Version, error)
 }
 
 type UpdateSourceGitRepo struct {
@@ -32,7 +32,7 @@ func (sGit *UpdateSourceGitRepo) getLoadFileUrl(fileId int) string {
 	return link
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]version, error) {
+func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Version, error) {
 	resp, err := doGetRequest(sGit.getSourceUrl(cfg), cfg, nil, nil)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]ver
 	if err != nil {
 		return nil, err
 	}
-	var resultVersions []version
+	var resultVersions []Version
 	for _, gData := range data {
 		gVersion, err := newVersionGit(cfg, gData, *sGit)
 		if err != nil {
