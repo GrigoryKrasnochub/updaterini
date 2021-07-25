@@ -15,8 +15,8 @@ type UpdateSource interface {
 }
 
 type UpdateSourceGitRepo struct {
-	UserName string
-	RepoName string
+	UserName            string
+	RepoName            string
 	PersonalAccessToken string // ONLY FOR DEBUG PURPOSE
 }
 
