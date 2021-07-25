@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
+	"syscall"
 )
 
 var (
@@ -14,6 +18,31 @@ var (
 
 const OldVersionReplacedFilesExtension = ".old"
 
+/*
+	USE CAREFULLY! Func will delete files by extension. (CHECK OldVersionReplacedFilesExtension)
+
+	func delete only files which have old and new version. Example:
+
+	/test.txt.old
+
+	/test.txt
+
+	/example.exe
+
+	func delete test.txt.old
+*/
+func DeletePreviousVersionFiles(dirPath string) error {
+	uR, err := getUpdateResultByDirScan(dirPath)
+	if err != nil {
+		return err
+	}
+
+	return uR.deletePrevVersionFiles()
+}
+
+/*
+	looking for new version in defined sources
+*/
 func (uc *UpdateConfig) CheckForUpdates() (*Version, error) {
 	var versions []Version
 	for _, source := range uc.Sources {
@@ -66,22 +95,28 @@ type updateFile struct {
 	updateFileMovedToDir bool
 }
 
+type updateResult struct {
+	updateFilesInfo []updateFile
+	updateDir       string
+}
+
 /*
 	Load Files -> Check hash -> doBeforeUpdate() ->
-	get file names from getReplacedFileName function, safe replace it if file exist in executable file folder.
+	get file names from getReplacedFileName function, safe replace it if file exist in folder
+	(curAppDir or cur exec file folder on empty string).
 	Do rollback on any trouble
 */
-func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileName func(loadedFilename string) (string, error), doBeforeUpdate func() error) error {
+func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileName func(loadedFilename string) (string, error), doBeforeUpdate func() error) (*updateResult, error) {
 	if curAppDir == "" {
 		exePath, err := os.Executable()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		curAppDir = filepath.Dir(exePath)
 	}
 	updateTempDir, err := os.MkdirTemp("", "update-*")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		tempErr := os.RemoveAll(updateTempDir)
@@ -118,14 +153,14 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		return err
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// TODO check files hash
 
 	err = doBeforeUpdate()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// replace files
@@ -134,7 +169,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		if updateErr == nil {
 			return nil
 		}
-		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo)
+		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, false)
 		if rollbackErr != nil {
 			return rollbackErr
 		}
@@ -153,7 +188,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 			err = os.Rename(curFilepath, curFilepath+OldVersionReplacedFilesExtension)
 			err = rollbackUpdateOnErr(err)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			updateFilesInfo[i].curFileRenamed = true
 		}
@@ -162,20 +197,30 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		err = os.Rename(updateFilesInfo[i].tmpFileName, curFilepath)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		updateFilesInfo[i].updateFileMovedToDir = true
 	}
 
-	return deletePreviousVersionFiles(curAppDir, updateFilesInfo) // TODO Windows can't delete function this way
+	return &updateResult{
+		updateFilesInfo: updateFilesInfo,
+		updateDir:       curAppDir,
+	}, nil
 }
 
-func deletePreviousVersionFiles(currentApplicationDir string, updateFiles []updateFile) error {
-	for _, file := range updateFiles {
+func (uR *updateResult) RollbackChanges() error {
+	return rollbackUpdatedFiles(uR.updateDir, uR.updateFilesInfo, true)
+}
+
+/*
+	can't delete files, which now are used or executed in Windows OS
+*/
+func (uR *updateResult) DeletePreviousVersionFiles() error {
+	for _, file := range uR.updateFilesInfo {
 		if !file.curFileRenamed {
 			continue
 		}
-		curFilepath := filepath.Join(currentApplicationDir, file.fileName)
+		curFilepath := filepath.Join(uR.updateDir, file.fileName)
 		err := os.Remove(curFilepath + OldVersionReplacedFilesExtension)
 		if err != nil {
 			return err
@@ -184,7 +229,155 @@ func deletePreviousVersionFiles(currentApplicationDir string, updateFiles []upda
 	return nil
 }
 
-func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile) error {
+/*
+	successfully delete all prev version files, even if they are used by current process (for all os)
+
+	after successful delete KILL current process (stop on err, no rollback)
+*/
+func (uR *updateResult) DeletePreviousVersionFilesAndKillCurrentProcess() error {
+	err := uR.deletePrevVersionFiles()
+	if err != nil {
+		return err
+	}
+	os.Exit(1)
+
+	return nil
+}
+
+/*
+	successfully delete all prev version files, even if they are used by current process (for all os)
+
+	after successful delete RUN exe (stop on err, no rollback)
+*/
+func (uR *updateResult) DeletePreviousVersionFilesAndRerunExe(exeArgs []string) error {
+	err := uR.deletePrevVersionFiles()
+	if err != nil {
+		return err
+	}
+	err = uR.RerunExe(exeArgs)
+	if err != nil {
+		return err
+	}
+	os.Exit(1)
+	return nil
+}
+
+func (uR *updateResult) RerunExe(exeArgs []string) error { // TODO delete methode?
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(executable, exeArgs...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	err = cmd.Start()
+	return err
+}
+
+/*
+	for Windows OS executable should be stopped! USE ONLY WITH cur executable file stops functions
+*/
+func (uR *updateResult) deletePrevVersionFiles() error {
+	var err error
+
+	switch runtime.GOOS {
+	case "windows":
+		var errFiles []string
+		for _, file := range uR.updateFilesInfo {
+			if !file.curFileRenamed {
+				continue
+			}
+			fPath := filepath.Join(uR.updateDir, file.fileName+OldVersionReplacedFilesExtension)
+			err := os.Remove(fPath)
+			if err != nil {
+				errFiles = append(errFiles, fPath)
+			}
+		}
+		var sI syscall.StartupInfo
+		var pI syscall.ProcessInformation
+		argv, tErr := syscall.UTF16PtrFromString(os.Getenv("windir") + "\\system32\\cmd.exe /C del " + strings.Join(errFiles, ", "))
+		if tErr != nil {
+			err = tErr
+			break
+		}
+		err = syscall.CreateProcess(
+			nil,
+			argv,
+			nil,
+			nil,
+			true,
+			0,
+			nil,
+			nil,
+			&sI,
+			&pI)
+	default:
+		err = uR.DeletePreviousVersionFiles()
+	}
+
+	return err
+}
+
+func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
+	if dirPath == "" {
+		dirPath = "."
+	}
+	type file struct {
+		path      string
+		hasOldVer bool
+		hasNewVer bool
+	}
+	var files map[string]*file
+	err := filepath.Walk(dirPath,
+		func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil
+			}
+			fName := info.Name()
+			if _, ok := files[fName]; !ok {
+				files[fName] = &file{
+					path: filepath.Dir(path),
+				}
+			}
+			isOld := strings.HasSuffix(fName, OldVersionReplacedFilesExtension)
+			if isOld {
+				files[fName].hasOldVer = true
+			} else {
+				files[fName].hasNewVer = true
+			}
+			return nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	var updFileInfo []updateFile
+	for fName, val := range files {
+		if val.hasOldVer && val.hasNewVer {
+			updFileInfo = append(updFileInfo, updateFile{
+				fileName:             fName,
+				tmpFileName:          "",
+				curFileRenamed:       true,
+				updateFileMovedToDir: true,
+			})
+		}
+	}
+	updRes := updateResult{
+		updateFilesInfo: updFileInfo,
+		updateDir:       dirPath,
+	}
+	return &updRes, nil
+}
+
+func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile, showErr bool) (err error) {
+	defer func() {
+		if !showErr && err != nil {
+			err = ErrorFailUpdateRollback
+		}
+	}()
 	for _, file := range updateFiles {
 		if !file.curFileRenamed && !file.updateFileMovedToDir {
 			continue
@@ -193,13 +386,13 @@ func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile
 		if file.updateFileMovedToDir {
 			err := os.Remove(curFilepath)
 			if err != nil {
-				return ErrorFailUpdateRollback
+				return err
 			}
 		}
 		if file.curFileRenamed {
 			err := os.Rename(curFilepath+OldVersionReplacedFilesExtension, curFilepath)
 			if err != nil {
-				return ErrorFailUpdateRollback
+				return err
 			}
 		}
 	}

@@ -17,6 +17,7 @@ type UpdateSource interface {
 type UpdateSourceGitRepo struct {
 	UserName string
 	RepoName string
+	PersonalAccessToken string // ONLY FOR DEBUG PURPOSE
 }
 
 func (sGit *UpdateSourceGitRepo) getSourceUrl(cfg applicationConfig) string {
@@ -36,6 +37,9 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Ver
 	resp, err := doGetRequest(sGit.getSourceUrl(cfg), cfg, nil, nil)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
 	}
 	defer func() {
 		if resp != nil {
@@ -69,7 +73,12 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Ver
 }
 
 func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg applicationConfig, fileId int) (io.ReadCloser, error) {
-	resp, err := doGetRequest(sGit.getLoadFileUrl(fileId), cfg, map[string]string{"Accept": "application/octet-stream"},
+	customHeaders := make(map[string]string, 2)
+	customHeaders["Accept"] = "application/octet-stream"
+	if sGit.PersonalAccessToken != "" {
+		customHeaders["Authorization"] = fmt.Sprintf("token %s", sGit.PersonalAccessToken)
+	}
+	resp, err := doGetRequest(sGit.getLoadFileUrl(fileId), cfg, customHeaders,
 		map[int]interface{}{200: struct{}{}, 302: struct{}{}})
 	if err != nil {
 		return nil, err

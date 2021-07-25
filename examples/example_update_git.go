@@ -2,21 +2,23 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/GrigoryKrasnochub/updaterini"
 )
 
 func main() {
-	updateExeFile()
+	UpdateExeFile()
 }
 
 /*
-	Do go build in examples dir
+	If you are Windows user do go build in examples dir
 
-	empty.exe would be updated to last release in updaterini_example rep
+	examples.exe would be updated to last release in updaterini_example rep
 */
-func updateExeFile() {
+func UpdateExeFile() {
 	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)})
 	if err != nil {
 		panic(err)
@@ -30,16 +32,19 @@ func updateExeFile() {
 			},
 		},
 	}
+
 	version, err := update.CheckForUpdates()
 	if err != nil {
-		fmt.Println("Ou, some critical err ", err)
+		panic(err)
 	}
+
 	if version != nil {
 		fmt.Println("Start Update!")
 		counter := 0
-		err = update.DoUpdate(*version, "", func(loadedFilename string) (string, error) {
+		updateResult, err := update.DoUpdate(*version, "", func(loadedFilename string) (string, error) {
 			if strings.HasSuffix(loadedFilename, ".exe") {
-				return "empty.exe", nil
+				exec, _ := os.Executable()
+				return filepath.Base(exec), nil // current exe file will be replaced
 			}
 			counter++
 			return fmt.Sprintf("new file %d", counter), nil
@@ -47,7 +52,11 @@ func updateExeFile() {
 			return nil
 		})
 		if err != nil {
-			fmt.Println("Ou, some err ", err)
+			panic(err)
+		}
+		err = updateResult.DeletePreviousVersionFilesAndRerunExe(nil)
+		if err != nil {
+			panic(err)
 		}
 		fmt.Println("Update DONE!")
 	} else {
@@ -55,7 +64,7 @@ func updateExeFile() {
 	}
 }
 
-func simpleVersionFileLoad() {
+func SimpleVersionFileLoad() {
 	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)})
 	if err != nil {
 		panic(err)
@@ -69,17 +78,19 @@ func simpleVersionFileLoad() {
 			},
 		},
 	}
+
 	version, err := update.CheckForUpdates()
 	if err != nil {
-		fmt.Println("Ou, some critical err ", err)
+		panic(err)
 	}
+
 	if version != nil {
 		fmt.Println("Start Update!")
 
 		// load file to your build dir
 		err = update.LoadFilesToDir(*version, "")
 		if err != nil {
-			fmt.Println("Ou, some err ", err)
+			panic(err)
 		}
 		fmt.Println("Update DONE!")
 	} else {
