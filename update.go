@@ -17,6 +17,8 @@ var (
 )
 
 const OldVersionReplacedFilesExtension = ".old"
+const VersionReplacedAndRollbackExtensionDif = "est"
+const OldVersionRollbackFilesExtension = OldVersionReplacedFilesExtension + VersionReplacedAndRollbackExtensionDif
 
 /*
 	USE CAREFULLY! Func will delete files by extension. (CHECK OldVersionReplacedFilesExtension)
@@ -31,13 +33,98 @@ const OldVersionReplacedFilesExtension = ".old"
 
 	func delete test.txt.old
 */
-func DeletePreviousVersionFiles(dirPath string) error {
+func UnsafeDeletePreviousVersionFiles(dirPath string) error {
 	uR, err := getUpdateResultByDirScan(dirPath)
 	if err != nil {
 		return err
 	}
 
-	return uR.deletePrevVersionFiles()
+	return uR.DeletePreviousVersionFiles(DeleteModPureDelete)
+}
+
+/*
+	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK OldVersionReplacedFilesExtension)
+*/
+
+type rollbackResults updateResult
+
+func RollbackUpdate(dirPath string) (*rollbackResults, error) {
+	uR, err := getUpdateResultByDirScan(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	type rollbackFile struct {
+		fileName                  string
+		replacedRenamedToRollback bool
+		usualRenamedToReplaced    bool
+		rollbackRenamedToUsual    bool
+	}
+
+	rbFiles := make([]rollbackFile, len(uR.updateFilesInfo))
+	rollbackUpdateOnErr := func(updateErr error) error {
+		if updateErr == nil {
+			return nil
+		}
+		for _, rbFile := range rbFiles {
+			if rbFile.rollbackRenamedToUsual {
+				err = os.Rename(rbFile.fileName, rbFile.fileName+OldVersionRollbackFilesExtension)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+			if rbFile.usualRenamedToReplaced {
+				err = os.Rename(rbFile.fileName+OldVersionReplacedFilesExtension, rbFile.fileName)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+			if rbFile.replacedRenamedToRollback {
+				err = os.Rename(rbFile.fileName+OldVersionRollbackFilesExtension, rbFile.fileName+OldVersionReplacedFilesExtension)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+		}
+		return updateErr
+	}
+
+	for i, val := range uR.updateFilesInfo {
+		rbFiles[i] = rollbackFile{fileName: val.fileName}
+
+		// .old to .oldest
+		err = os.Rename(val.fileName+OldVersionReplacedFilesExtension, val.fileName+OldVersionRollbackFilesExtension)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].replacedRenamedToRollback = true
+
+		// usual to .old
+		err = os.Rename(val.fileName, val.fileName+OldVersionReplacedFilesExtension)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].usualRenamedToReplaced = true
+
+		// .old to usual
+		err = os.Rename(val.fileName+OldVersionRollbackFilesExtension, val.fileName)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].rollbackRenamedToUsual = true
+	}
+	rbRes := rollbackResults(*uR)
+	return &rbRes, nil
+}
+
+/*
+	check dock in DeletePreviousVersionFiles func
+*/
+func (rbRes *rollbackResults) DeleteLoadedVersionFiles(mod DeleteMode, params ...interface{}) error {
+	uRes := updateResult(*rbRes)
+	return uRes.DeletePreviousVersionFiles(mod, params)
 }
 
 /*
@@ -169,7 +256,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		if updateErr == nil {
 			return nil
 		}
-		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, false)
+		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, OldVersionReplacedFilesExtension, false)
 		if rollbackErr != nil {
 			return rollbackErr
 		}
@@ -209,56 +296,69 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 }
 
 func (uR *updateResult) RollbackChanges() error {
-	return rollbackUpdatedFiles(uR.updateDir, uR.updateFilesInfo, true)
+	return rollbackUpdatedFiles(uR.updateDir, uR.updateFilesInfo, OldVersionReplacedFilesExtension, true)
 }
 
+type DeleteMode int
+
+const (
+	DeleteModPureDelete  DeleteMode = iota // Just delete files, can't delete files, which now are used or executed in Windows OS
+	DeleteModKillProcess                   // successfully delete all prev version files, even if they are used by current process (for all os) after successful delete KILL current process (stop on err, no rollback)
+	DeleteModRerunExec                     // successfully delete all prev version files, even if they are used by current process (for all os) after successful delete RUN exe (stop on err, no rollback)
+)
+
 /*
-	can't delete files, which now are used or executed in Windows OS
+	Delete prev version files, choose delete type based on your purpose
+
+	DeleteModPureDelete no params
+
+	DeleteModKillProcess no params
+
+	DeleteModRerunExec	use params to set executable file call args
 */
-func (uR *updateResult) DeletePreviousVersionFiles() error {
-	for _, file := range uR.updateFilesInfo {
-		if !file.curFileRenamed {
-			continue
+func (uR *updateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...interface{}) error {
+	switch mode {
+	case DeleteModPureDelete:
+		for _, file := range uR.updateFilesInfo {
+			if !file.curFileRenamed {
+				continue
+			}
+			curFilepath := filepath.Join(uR.updateDir, file.fileName)
+			err := os.Remove(curFilepath + OldVersionReplacedFilesExtension)
+			if err != nil {
+				return err
+			}
 		}
-		curFilepath := filepath.Join(uR.updateDir, file.fileName)
-		err := os.Remove(curFilepath + OldVersionReplacedFilesExtension)
+	case DeleteModKillProcess:
+		err := uR.deletePrevVersionFiles()
 		if err != nil {
 			return err
 		}
+		os.Exit(1)
+	case DeleteModRerunExec:
+		err := uR.deletePrevVersionFiles()
+		if err != nil {
+			return err
+		}
+		var exeArgs []string
+		if params != nil {
+			for _, param := range params {
+				switch param.(type) {
+				case string:
+					exeArgs = append(exeArgs, param.(string))
+				case []string:
+					exeArgs = append(exeArgs, param.([]string)...)
+				}
+			}
+
+		}
+		err = uR.RerunExe(exeArgs)
+		if err != nil {
+			return err
+		}
+		os.Exit(1)
 	}
-	return nil
-}
 
-/*
-	successfully delete all prev version files, even if they are used by current process (for all os)
-
-	after successful delete KILL current process (stop on err, no rollback)
-*/
-func (uR *updateResult) DeletePreviousVersionFilesAndKillCurrentProcess() error {
-	err := uR.deletePrevVersionFiles()
-	if err != nil {
-		return err
-	}
-	os.Exit(1)
-
-	return nil
-}
-
-/*
-	successfully delete all prev version files, even if they are used by current process (for all os)
-
-	after successful delete RUN exe (stop on err, no rollback)
-*/
-func (uR *updateResult) DeletePreviousVersionFilesAndRerunExe(exeArgs []string) error {
-	err := uR.deletePrevVersionFiles()
-	if err != nil {
-		return err
-	}
-	err = uR.RerunExe(exeArgs)
-	if err != nil {
-		return err
-	}
-	os.Exit(1)
 	return nil
 }
 
@@ -313,7 +413,7 @@ func (uR *updateResult) deletePrevVersionFiles() error {
 			&sI,
 			&pI)
 	default:
-		err = uR.DeletePreviousVersionFiles()
+		err = uR.DeletePreviousVersionFiles(DeleteModPureDelete)
 	}
 
 	return err
@@ -337,7 +437,7 @@ func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
 			if info.IsDir() {
 				return nil
 			}
-			fName := info.Name()
+			fName := strings.TrimRight(info.Name(), OldVersionReplacedFilesExtension)
 			if _, ok := files[fName]; !ok {
 				files[fName] = &file{
 					path: filepath.Dir(path),
@@ -372,7 +472,7 @@ func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
 	return &updRes, nil
 }
 
-func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile, showErr bool) (err error) {
+func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile, preVersionExtension string, showErr bool) (err error) {
 	defer func() {
 		if !showErr && err != nil {
 			err = ErrorFailUpdateRollback
@@ -390,7 +490,7 @@ func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile
 			}
 		}
 		if file.curFileRenamed {
-			err := os.Rename(curFilepath+OldVersionReplacedFilesExtension, curFilepath)
+			err := os.Rename(curFilepath+preVersionExtension, curFilepath)
 			if err != nil {
 				return err
 			}

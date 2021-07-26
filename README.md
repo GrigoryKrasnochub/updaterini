@@ -1,2 +1,2 @@
 # updaterini
-update your build from different sources and different chanels
+update your build from different sources and different channels

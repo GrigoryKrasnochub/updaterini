@@ -54,7 +54,7 @@ func UpdateExeFile() {
 		if err != nil {
 			panic(err)
 		}
-		err = updateResult.DeletePreviousVersionFilesAndRerunExe(nil)
+		err = updateResult.DeletePreviousVersionFiles(updaterini.DeleteModRerunExec, nil)
 		if err != nil {
 			panic(err)
 		}
