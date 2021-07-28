@@ -33,6 +33,10 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 	for _, vTest := range versionTests {
 		ver, _ := newVersionGit(*cfg, gitData{
 			Version: vTest.version,
+			Assets: []gitAssets{
+				{Size: 1, Id: 1, Filename: "v1.0.1_linux_amd64", Url: ""},
+				{Size: 1, Id: 2, Filename: "v1.0.1_windows_amd64", Url: ""},
+			},
 		}, UpdateSourceGitRepo{
 			UserName: "",
 			RepoName: "",

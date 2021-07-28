@@ -21,113 +21,6 @@ const VersionReplacedAndRollbackExtensionDif = "est"
 const OldVersionRollbackFilesExtension = OldVersionReplacedFilesExtension + VersionReplacedAndRollbackExtensionDif
 
 /*
-	USE CAREFULLY! Func will delete files by extension. (CHECK OldVersionReplacedFilesExtension)
-
-	func delete only files which have old and new version. Example:
-
-	/test.txt.old
-
-	/test.txt
-
-	/example.exe
-
-	func delete test.txt.old
-*/
-func UnsafeDeletePreviousVersionFiles(dirPath string) error {
-	uR, err := getUpdateResultByDirScan(dirPath)
-	if err != nil {
-		return err
-	}
-
-	return uR.DeletePreviousVersionFiles(DeleteModPureDelete)
-}
-
-/*
-	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK OldVersionReplacedFilesExtension)
-*/
-
-type rollbackResults updateResult
-
-func RollbackUpdate(dirPath string) (*rollbackResults, error) {
-	uR, err := getUpdateResultByDirScan(dirPath)
-	if err != nil {
-		return nil, err
-	}
-	type rollbackFile struct {
-		fileName                  string
-		replacedRenamedToRollback bool
-		usualRenamedToReplaced    bool
-		rollbackRenamedToUsual    bool
-	}
-
-	rbFiles := make([]rollbackFile, len(uR.updateFilesInfo))
-	rollbackUpdateOnErr := func(updateErr error) error {
-		if updateErr == nil {
-			return nil
-		}
-		for _, rbFile := range rbFiles {
-			if rbFile.rollbackRenamedToUsual {
-				err = os.Rename(rbFile.fileName, rbFile.fileName+OldVersionRollbackFilesExtension)
-				if err != nil {
-					return ErrorFailUpdateRollback
-				}
-			}
-			if rbFile.usualRenamedToReplaced {
-				err = os.Rename(rbFile.fileName+OldVersionReplacedFilesExtension, rbFile.fileName)
-				if err != nil {
-					return ErrorFailUpdateRollback
-				}
-			}
-			if rbFile.replacedRenamedToRollback {
-				err = os.Rename(rbFile.fileName+OldVersionRollbackFilesExtension, rbFile.fileName+OldVersionReplacedFilesExtension)
-				if err != nil {
-					return ErrorFailUpdateRollback
-				}
-			}
-		}
-		return updateErr
-	}
-
-	for i, val := range uR.updateFilesInfo {
-		rbFiles[i] = rollbackFile{fileName: val.fileName}
-
-		// .old to .oldest
-		err = os.Rename(val.fileName+OldVersionReplacedFilesExtension, val.fileName+OldVersionRollbackFilesExtension)
-		err = rollbackUpdateOnErr(err)
-		if err != nil {
-			return nil, err
-		}
-		rbFiles[i].replacedRenamedToRollback = true
-
-		// usual to .old
-		err = os.Rename(val.fileName, val.fileName+OldVersionReplacedFilesExtension)
-		err = rollbackUpdateOnErr(err)
-		if err != nil {
-			return nil, err
-		}
-		rbFiles[i].usualRenamedToReplaced = true
-
-		// .old to usual
-		err = os.Rename(val.fileName+OldVersionRollbackFilesExtension, val.fileName)
-		err = rollbackUpdateOnErr(err)
-		if err != nil {
-			return nil, err
-		}
-		rbFiles[i].rollbackRenamedToUsual = true
-	}
-	rbRes := rollbackResults(*uR)
-	return &rbRes, nil
-}
-
-/*
-	check dock in DeletePreviousVersionFiles func
-*/
-func (rbRes *rollbackResults) DeleteLoadedVersionFiles(mod DeleteMode, params ...interface{}) error {
-	uRes := updateResult(*rbRes)
-	return uRes.DeletePreviousVersionFiles(mod, params)
-}
-
-/*
 	looking for new version in defined sources
 */
 func (uc *UpdateConfig) CheckForUpdates() (*Version, error) {
@@ -302,7 +195,7 @@ func (uR *updateResult) RollbackChanges() error {
 type DeleteMode int
 
 const (
-	DeleteModPureDelete  DeleteMode = iota // Just delete files, can't delete files, which now are used or executed in Windows OS
+	DeleteModPureDelete  DeleteMode = iota // just delete files, can't delete files, which now are used or executed in Windows OS
 	DeleteModKillProcess                   // successfully delete all prev version files, even if they are used by current process (for all os) after successful delete KILL current process (stop on err, no rollback)
 	DeleteModRerunExec                     // successfully delete all prev version files, even if they are used by current process (for all os) after successful delete RUN exe (stop on err, no rollback)
 )
@@ -376,6 +269,112 @@ func (uR *updateResult) RerunExe(exeArgs []string) error { // TODO delete method
 }
 
 /*
+	USE CAREFULLY! Func will delete files by extension. (CHECK OldVersionReplacedFilesExtension)
+
+	func delete only files which have old and new version. Example:
+
+	/test.txt.old
+
+	/test.txt
+
+	/example.exe
+
+	func delete test.txt.old
+*/
+func UnsafeDeletePreviousVersionFiles(dirPath string) error {
+	uR, err := getUpdateResultByDirScan(dirPath)
+	if err != nil {
+		return err
+	}
+
+	return uR.DeletePreviousVersionFiles(DeleteModPureDelete)
+}
+
+type rollbackResults updateResult
+
+/*
+	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK OldVersionReplacedFilesExtension)
+*/
+func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
+	uR, err := getUpdateResultByDirScan(dirPath)
+	if err != nil {
+		return nil, err
+	}
+	type rollbackFile struct {
+		fileName                  string
+		replacedRenamedToRollback bool
+		usualRenamedToReplaced    bool
+		rollbackRenamedToUsual    bool
+	}
+
+	rbFiles := make([]rollbackFile, len(uR.updateFilesInfo))
+	rollbackUpdateOnErr := func(updateErr error) error {
+		if updateErr == nil {
+			return nil
+		}
+		for _, rbFile := range rbFiles {
+			if rbFile.rollbackRenamedToUsual {
+				err = os.Rename(rbFile.fileName, rbFile.fileName+OldVersionRollbackFilesExtension)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+			if rbFile.usualRenamedToReplaced {
+				err = os.Rename(rbFile.fileName+OldVersionReplacedFilesExtension, rbFile.fileName)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+			if rbFile.replacedRenamedToRollback {
+				err = os.Rename(rbFile.fileName+OldVersionRollbackFilesExtension, rbFile.fileName+OldVersionReplacedFilesExtension)
+				if err != nil {
+					return ErrorFailUpdateRollback
+				}
+			}
+		}
+		return updateErr
+	}
+
+	for i, val := range uR.updateFilesInfo {
+		rbFiles[i] = rollbackFile{fileName: val.fileName}
+
+		// .old to .oldest
+		err = os.Rename(val.fileName+OldVersionReplacedFilesExtension, val.fileName+OldVersionRollbackFilesExtension)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].replacedRenamedToRollback = true
+
+		// usual to .old
+		err = os.Rename(val.fileName, val.fileName+OldVersionReplacedFilesExtension)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].usualRenamedToReplaced = true
+
+		// .old to usual
+		err = os.Rename(val.fileName+OldVersionRollbackFilesExtension, val.fileName)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return nil, err
+		}
+		rbFiles[i].rollbackRenamedToUsual = true
+	}
+	rbRes := rollbackResults(*uR)
+	return &rbRes, nil
+}
+
+/*
+	check documentation in DeletePreviousVersionFiles func
+*/
+func (rbRes *rollbackResults) DeleteLoadedVersionFiles(mod DeleteMode, params ...interface{}) error {
+	uRes := updateResult(*rbRes)
+	return uRes.DeletePreviousVersionFiles(mod, params)
+}
+
+/*
 	for Windows OS executable should be stopped! USE ONLY WITH cur executable file stops functions
 */
 func (uR *updateResult) deletePrevVersionFiles() error {
@@ -424,11 +423,10 @@ func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
 		dirPath = "."
 	}
 	type file struct {
-		path      string
 		hasOldVer bool
 		hasNewVer bool
 	}
-	var files map[string]*file
+	files := make(map[string]*file)
 	err := filepath.Walk(dirPath,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -437,17 +435,19 @@ func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
 			if info.IsDir() {
 				return nil
 			}
-			fName := strings.TrimRight(info.Name(), OldVersionReplacedFilesExtension)
-			if _, ok := files[fName]; !ok {
-				files[fName] = &file{
-					path: filepath.Dir(path),
-				}
+			relFilePath, err := filepath.Rel(dirPath, path)
+			if err != nil {
+				return err
 			}
-			isOld := strings.HasSuffix(fName, OldVersionReplacedFilesExtension)
+			relFilePath = strings.TrimSuffix(relFilePath, OldVersionReplacedFilesExtension)
+			if _, ok := files[relFilePath]; !ok {
+				files[relFilePath] = &file{}
+			}
+			isOld := strings.HasSuffix(info.Name(), OldVersionReplacedFilesExtension)
 			if isOld {
-				files[fName].hasOldVer = true
+				files[relFilePath].hasOldVer = true
 			} else {
-				files[fName].hasNewVer = true
+				files[relFilePath].hasNewVer = true
 			}
 			return nil
 		})
