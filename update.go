@@ -300,13 +300,13 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	type rollbackFile struct {
-		fileName                  string
+		filePath                  string
 		replacedRenamedToRollback bool
 		usualRenamedToReplaced    bool
 		rollbackRenamedToUsual    bool
 	}
-
 	rbFiles := make([]rollbackFile, len(uR.updateFilesInfo))
 	rollbackUpdateOnErr := func(updateErr error) error {
 		if updateErr == nil {
@@ -314,19 +314,19 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		}
 		for _, rbFile := range rbFiles {
 			if rbFile.rollbackRenamedToUsual {
-				err = os.Rename(rbFile.fileName, rbFile.fileName+OldVersionRollbackFilesExtension)
+				err = os.Rename(rbFile.filePath, rbFile.filePath+OldVersionRollbackFilesExtension)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
 			}
 			if rbFile.usualRenamedToReplaced {
-				err = os.Rename(rbFile.fileName+OldVersionReplacedFilesExtension, rbFile.fileName)
+				err = os.Rename(rbFile.filePath+OldVersionReplacedFilesExtension, rbFile.filePath)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
 			}
 			if rbFile.replacedRenamedToRollback {
-				err = os.Rename(rbFile.fileName+OldVersionRollbackFilesExtension, rbFile.fileName+OldVersionReplacedFilesExtension)
+				err = os.Rename(rbFile.filePath+OldVersionRollbackFilesExtension, rbFile.filePath+OldVersionReplacedFilesExtension)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
@@ -336,10 +336,10 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 	}
 
 	for i, val := range uR.updateFilesInfo {
-		rbFiles[i] = rollbackFile{fileName: val.fileName}
+		rbFiles[i] = rollbackFile{filePath: filepath.Join(uR.updateDir, val.fileName)}
 
 		// .old to .oldest
-		err = os.Rename(val.fileName+OldVersionReplacedFilesExtension, val.fileName+OldVersionRollbackFilesExtension)
+		err = os.Rename(rbFiles[i].filePath+OldVersionReplacedFilesExtension, rbFiles[i].filePath+OldVersionRollbackFilesExtension)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
@@ -347,15 +347,15 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		rbFiles[i].replacedRenamedToRollback = true
 
 		// usual to .old
-		err = os.Rename(val.fileName, val.fileName+OldVersionReplacedFilesExtension)
+		err = os.Rename(rbFiles[i].filePath, rbFiles[i].filePath+OldVersionReplacedFilesExtension)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
 		}
 		rbFiles[i].usualRenamedToReplaced = true
 
-		// .old to usual
-		err = os.Rename(val.fileName+OldVersionRollbackFilesExtension, val.fileName)
+		// .oldest to usual
+		err = os.Rename(rbFiles[i].filePath+OldVersionRollbackFilesExtension, rbFiles[i].filePath)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
@@ -395,7 +395,7 @@ func (uR *updateResult) deletePrevVersionFiles() error {
 		}
 		var sI syscall.StartupInfo
 		var pI syscall.ProcessInformation
-		argv, tErr := syscall.UTF16PtrFromString(os.Getenv("windir") + "\\system32\\cmd.exe /C del " + strings.Join(errFiles, ", "))
+		argv, tErr := syscall.UTF16PtrFromString(os.Getenv("windir") + "\\system32\\cmd.exe timeout /T 10 /C del " + strings.Join(errFiles, ", "))
 		if tErr != nil {
 			err = tErr
 			break

@@ -9,8 +9,10 @@ import (
 )
 
 type file struct {
-	relPath    string
-	shouldStay bool
+	relPath              string
+	shouldStay           bool
+	contentBeforeReplace *string
+	contentAfterReplace  *string
 }
 
 func testFilesFunction(files []file, fileWorksFunction func(appDir string) error, t *testing.T) {
@@ -25,13 +27,11 @@ func testFilesFunction(files []file, fileWorksFunction func(appDir string) error
 		}
 	}()
 
-	// create test dir
-	resultFiles := make(map[string]bool)
+	// create test dirs
+	resultFiles := make(map[string]file)
 	for _, tFile := range files {
 		fPath := filepath.Join(tempDir, tFile.relPath)
-		if tFile.shouldStay {
-			resultFiles[fPath] = false
-		}
+		resultFiles[fPath] = tFile
 		dirPath, _ := filepath.Split(tFile.relPath)
 		if dirPath != "" {
 			err = os.MkdirAll(filepath.Join(tempDir, dirPath), os.ModeDir)
@@ -42,6 +42,12 @@ func testFilesFunction(files []file, fileWorksFunction func(appDir string) error
 		nFile, err := os.Create(fPath)
 		if err != nil {
 			t.Fatalf("create file err %s", err)
+		}
+		if tFile.contentBeforeReplace != nil {
+			_, err = nFile.WriteString(*tFile.contentBeforeReplace)
+			if err != nil {
+				t.Fatalf("file write err %s", err)
+			}
 		}
 		err = nFile.Close()
 		if err != nil {
@@ -55,28 +61,40 @@ func testFilesFunction(files []file, fileWorksFunction func(appDir string) error
 		t.Fatalf("some fileWorks func err %s", err)
 	}
 
-	// check results
-	err = filepath.WalkDir(tempDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			t.Fatalf("dir walk err %s", err)
+	// check expected files
+	for fPath, rFileInfo := range resultFiles {
+		if _, err := os.Stat(fPath); os.IsNotExist(err) {
+			if rFileInfo.shouldStay {
+				t.Errorf("file shoudn`t be deleted. filepath: %s", fPath)
+			}
+			continue
 		}
+
+		fData, err := os.ReadFile(fPath)
+		if err != nil {
+			t.Fatalf("file read err %s", err)
+		}
+		if (rFileInfo.contentAfterReplace == nil && len(fData) != 0) || (rFileInfo.contentAfterReplace != nil && string(fData) != *rFileInfo.contentAfterReplace) {
+			expectedContent := "nil"
+			if rFileInfo.contentAfterReplace != nil {
+				expectedContent = *rFileInfo.contentAfterReplace
+			}
+			t.Errorf("file content is incorect. filepath: %s; expected content: %s; fact content: %s", fPath, expectedContent, fData)
+		}
+	}
+
+	// check unexpected files
+	err = filepath.WalkDir(tempDir, func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() {
 			return nil
 		}
 		if _, ok := resultFiles[path]; !ok {
-			t.Errorf("file should be deleted filepath: %s", path)
+			t.Errorf("undefined file err, posible test file creation err. filepath: %s", path)
 		}
-		resultFiles[path] = true
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("dir walk err %s", err)
-	}
-
-	for fPath, fileResultStatus := range resultFiles {
-		if !fileResultStatus {
-			t.Errorf("file is deleted, but should't : %s", fPath)
-		}
 	}
 }
 
@@ -111,6 +129,38 @@ func TestUnsafeFileDelete2(t *testing.T) {
 	testFilesFunction(files, UnsafeDeletePreviousVersionFiles, t)
 }
 
-//TODO TEST ROLLBACK
+func TestUnsafeRollbackUpdate(t *testing.T) {
+	exeFileContent := "exe test content"
+	files := []file{
+		{relPath: "test.exe", shouldStay: true, contentAfterReplace: &exeFileContent},
+		{relPath: "test.exe.old", shouldStay: false, contentBeforeReplace: &exeFileContent},
+		{relPath: "test.dll", shouldStay: true},
+	}
+	testFilesFunction(files, func(appDir string) error {
+		rR, err := UnsafeRollbackUpdate(appDir)
+		if err != nil {
+			return err
+		}
+		return rR.DeleteLoadedVersionFiles(DeleteModPureDelete)
+	}, t)
+}
 
-//TODO TEST UNSAFEROLLBACK
+func TestUnsafeRollbackUpdate1(t *testing.T) {
+	exeFileContent := "exe test content"
+	exeFileContentOldExe := "exe test content old exe"
+	dllFileContent := "dll test content"
+	files := []file{
+		{relPath: "test.exe", shouldStay: true, contentAfterReplace: &exeFileContent},
+		{relPath: "test.exe.old", shouldStay: false, contentBeforeReplace: &exeFileContent},
+		{relPath: "build/test.exe.old", shouldStay: false, contentAfterReplace: &exeFileContentOldExe, contentBeforeReplace: &exeFileContentOldExe},
+		{relPath: "test.dll", shouldStay: true, contentAfterReplace: &dllFileContent},
+		{relPath: "test.dll.old", shouldStay: false, contentBeforeReplace: &dllFileContent},
+	}
+	testFilesFunction(files, func(appDir string) error {
+		rR, err := UnsafeRollbackUpdate(appDir)
+		if err != nil {
+			return err
+		}
+		return rR.DeleteLoadedVersionFiles(DeleteModPureDelete)
+	}, t)
+}
