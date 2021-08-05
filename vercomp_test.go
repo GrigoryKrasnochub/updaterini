@@ -25,7 +25,7 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 		t.Errorf("bad tests. more than one version is max")
 	}
 
-	cfg, err := NewApplicationConfig(curVersion.version, channels)
+	cfg, err := NewApplicationConfig(curVersion.version, channels, nil)
 	if err != nil {
 		t.Errorf("creating new version err: %s", err)
 	}
@@ -33,7 +33,12 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 	for _, vTest := range versionTests {
 		ver, _ := newVersionGit(*cfg, gitData{
 			Version: vTest.version,
-			Assets: []gitAssets{
+			Assets: []struct {
+				Size     int
+				Id       int
+				Filename string `json:"name"`
+				Url      string `json:"browser_download_url"`
+			}{
 				{Size: 1, Id: 1, Filename: "v1.0.1_linux_amd64", Url: ""},
 				{Size: 1, Id: 2, Filename: "v1.0.1_windows_amd64", Url: ""},
 			},

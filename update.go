@@ -12,28 +12,65 @@ import (
 	"syscall"
 )
 
-var (
-	ErrorFailUpdateRollback = errors.New("error. update rollback failed")
-)
+var ErrorFailUpdateRollback = errors.New("error. update rollback failed")
 
-const OldVersionReplacedFilesExtension = ".old"
-const VersionReplacedAndRollbackExtensionDif = "est"
-const OldVersionRollbackFilesExtension = OldVersionReplacedFilesExtension + VersionReplacedAndRollbackExtensionDif
+const oldVersionReplacedFilesExtension = ".old"
+const versionReplacedAndRollbackExtensionDif = "est"
+const oldVersionRollbackFilesExtension = oldVersionReplacedFilesExtension + versionReplacedAndRollbackExtensionDif
 
 /*
 	looking for new version in defined sources
 */
-func (uc *UpdateConfig) CheckForUpdates() (*Version, error) {
+func (uc *UpdateConfig) CheckAllSourcesForUpdates() (*Version, error) {
 	var versions []Version
 	for _, source := range uc.Sources {
 		sVersions, err := source.getSourceVersions(uc.ApplicationConfig)
-		if uc.ApplicationConfig.ShowPrepareVersionErr && err != nil {
-			return nil, err
+		if err != nil {
+			if uc.ApplicationConfig.ShowPrepareVersionErr {
+				return nil, err
+			}
+			continue
 		}
 		versions = append(versions, sVersions...)
 	}
 	ver, _ := getLatestVersion(uc.ApplicationConfig, versions)
 	return ver, nil
+}
+
+/*
+	looking for new version in defined sources. First source response with Ok code and any versions (even nil) will stop any other attempt to check other sources
+*/
+func (uc *UpdateConfig) CheckForUpdates() (*Version, error) {
+	var err error
+	version := uc.CheckForUpdatesWithErrCallback(func(innerErr error, source UpdateSource, sourceIndex int) error {
+		if uc.ApplicationConfig.ShowPrepareVersionErr {
+			err = innerErr
+			return innerErr
+		}
+		return nil
+	})
+	return version, err
+}
+
+/*
+	looking for new version in defined sources. First source response with 200 code and any versions (even nil) will stop any other attempt to check other sources
+	return trigger callback on EVERY ERROR in THIS FUNC. Return err from callback to stop func execution
+*/
+func (uc *UpdateConfig) CheckForUpdatesWithErrCallback(catchError func(err error, source UpdateSource, sourceIndex int) error) *Version {
+	for sourceIndex, source := range uc.Sources {
+		sVersions, err := source.getSourceVersions(uc.ApplicationConfig)
+		if err != nil {
+			err := catchError(err, source, sourceIndex)
+			if err != nil {
+				return nil
+			}
+			continue
+		}
+		version, _ := getLatestVersion(uc.ApplicationConfig, sVersions)
+		return version
+	}
+
+	return nil
 }
 
 /*
@@ -136,8 +173,6 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		return nil, err
 	}
 
-	// TODO check files hash
-
 	err = doBeforeUpdate()
 	if err != nil {
 		return nil, err
@@ -149,7 +184,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		if updateErr == nil {
 			return nil
 		}
-		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, OldVersionReplacedFilesExtension, false)
+		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, oldVersionReplacedFilesExtension, false)
 		if rollbackErr != nil {
 			return rollbackErr
 		}
@@ -165,7 +200,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 			if fInfo.IsDir() {
 				continue
 			}
-			err = os.Rename(curFilepath, curFilepath+OldVersionReplacedFilesExtension)
+			err = os.Rename(curFilepath, curFilepath+oldVersionReplacedFilesExtension)
 			err = rollbackUpdateOnErr(err)
 			if err != nil {
 				return nil, err
@@ -189,7 +224,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 }
 
 func (uR *updateResult) RollbackChanges() error {
-	return rollbackUpdatedFiles(uR.updateDir, uR.updateFilesInfo, OldVersionReplacedFilesExtension, true)
+	return rollbackUpdatedFiles(uR.updateDir, uR.updateFilesInfo, oldVersionReplacedFilesExtension, true)
 }
 
 type DeleteMode int
@@ -201,7 +236,7 @@ const (
 )
 
 /*
-	Delete prev version files, choose delete type based on your purpose
+	Delete prev version files, choose to delete type based on your purpose
 
 	DeleteModPureDelete no params
 
@@ -217,7 +252,7 @@ func (uR *updateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 				continue
 			}
 			curFilepath := filepath.Join(uR.updateDir, file.fileName)
-			err := os.Remove(curFilepath + OldVersionReplacedFilesExtension)
+			err := os.Remove(curFilepath + oldVersionReplacedFilesExtension)
 			if err != nil {
 				return err
 			}
@@ -255,7 +290,7 @@ func (uR *updateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 	return nil
 }
 
-func (uR *updateResult) RerunExe(exeArgs []string) error { // TODO delete methode?
+func (uR *updateResult) RerunExe(exeArgs []string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -269,7 +304,7 @@ func (uR *updateResult) RerunExe(exeArgs []string) error { // TODO delete method
 }
 
 /*
-	USE CAREFULLY! Func will delete files by extension. (CHECK OldVersionReplacedFilesExtension)
+	USE CAREFULLY! Func will delete files by extension. (CHECK oldVersionReplacedFilesExtension)
 
 	func delete only files which have old and new version. Example:
 
@@ -286,14 +321,13 @@ func UnsafeDeletePreviousVersionFiles(dirPath string) error {
 	if err != nil {
 		return err
 	}
-
 	return uR.DeletePreviousVersionFiles(DeleteModPureDelete)
 }
 
 type rollbackResults updateResult
 
 /*
-	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK OldVersionReplacedFilesExtension)
+	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK oldVersionReplacedFilesExtension)
 */
 func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 	uR, err := getUpdateResultByDirScan(dirPath)
@@ -314,19 +348,19 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		}
 		for _, rbFile := range rbFiles {
 			if rbFile.rollbackRenamedToUsual {
-				err = os.Rename(rbFile.filePath, rbFile.filePath+OldVersionRollbackFilesExtension)
+				err = os.Rename(rbFile.filePath, rbFile.filePath+oldVersionRollbackFilesExtension)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
 			}
 			if rbFile.usualRenamedToReplaced {
-				err = os.Rename(rbFile.filePath+OldVersionReplacedFilesExtension, rbFile.filePath)
+				err = os.Rename(rbFile.filePath+oldVersionReplacedFilesExtension, rbFile.filePath)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
 			}
 			if rbFile.replacedRenamedToRollback {
-				err = os.Rename(rbFile.filePath+OldVersionRollbackFilesExtension, rbFile.filePath+OldVersionReplacedFilesExtension)
+				err = os.Rename(rbFile.filePath+oldVersionRollbackFilesExtension, rbFile.filePath+oldVersionReplacedFilesExtension)
 				if err != nil {
 					return ErrorFailUpdateRollback
 				}
@@ -339,7 +373,7 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		rbFiles[i] = rollbackFile{filePath: filepath.Join(uR.updateDir, val.fileName)}
 
 		// .old to .oldest
-		err = os.Rename(rbFiles[i].filePath+OldVersionReplacedFilesExtension, rbFiles[i].filePath+OldVersionRollbackFilesExtension)
+		err = os.Rename(rbFiles[i].filePath+oldVersionReplacedFilesExtension, rbFiles[i].filePath+oldVersionRollbackFilesExtension)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
@@ -347,7 +381,7 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		rbFiles[i].replacedRenamedToRollback = true
 
 		// usual to .old
-		err = os.Rename(rbFiles[i].filePath, rbFiles[i].filePath+OldVersionReplacedFilesExtension)
+		err = os.Rename(rbFiles[i].filePath, rbFiles[i].filePath+oldVersionReplacedFilesExtension)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
@@ -355,7 +389,7 @@ func UnsafeRollbackUpdate(dirPath string) (*rollbackResults, error) {
 		rbFiles[i].usualRenamedToReplaced = true
 
 		// .oldest to usual
-		err = os.Rename(rbFiles[i].filePath+OldVersionRollbackFilesExtension, rbFiles[i].filePath)
+		err = os.Rename(rbFiles[i].filePath+oldVersionRollbackFilesExtension, rbFiles[i].filePath)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return nil, err
@@ -387,7 +421,7 @@ func (uR *updateResult) deletePrevVersionFiles() error {
 			if !file.curFileRenamed {
 				continue
 			}
-			fPath := filepath.Join(uR.updateDir, file.fileName+OldVersionReplacedFilesExtension)
+			fPath := filepath.Join(uR.updateDir, file.fileName+oldVersionReplacedFilesExtension)
 			err := os.Remove(fPath)
 			if err != nil {
 				errFiles = append(errFiles, fPath)
@@ -439,11 +473,11 @@ func getUpdateResultByDirScan(dirPath string) (*updateResult, error) {
 			if err != nil {
 				return err
 			}
-			relFilePath = strings.TrimSuffix(relFilePath, OldVersionReplacedFilesExtension)
+			relFilePath = strings.TrimSuffix(relFilePath, oldVersionReplacedFilesExtension)
 			if _, ok := files[relFilePath]; !ok {
 				files[relFilePath] = &file{}
 			}
-			isOld := strings.HasSuffix(info.Name(), OldVersionReplacedFilesExtension)
+			isOld := strings.HasSuffix(info.Name(), oldVersionReplacedFilesExtension)
 			if isOld {
 				files[relFilePath].hasOldVer = true
 			} else {

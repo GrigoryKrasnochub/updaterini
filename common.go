@@ -2,11 +2,15 @@ package updaterini
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
+	"runtime"
 )
 
 var (
 	ErrorNotUniqChannelsNames = errors.New("channels names are not uniq")
+
+	defaultValidFileNameRegex = regexp.MustCompile(fmt.Sprintf(".*%s_%s.*", runtime.GOOS, runtime.GOARCH))
 )
 
 type Channel struct {
@@ -53,18 +57,20 @@ func GetReleaseChanel(useForUpdate bool) Channel {
 }
 
 type applicationConfig struct {
-	currentVersion        versionCurrent
-	channels              []Channel
-	versionRegex          *regexp.Regexp
-	ShowPrepareVersionErr bool
+	currentVersion            versionCurrent
+	channels                  []Channel
+	ValidateFilesNamesRegexes []*regexp.Regexp // match with any regex file is valid
+	ShowPrepareVersionErr     bool             // on false block non-critical errors
 }
 
 /*
 	version - current version with channel
 
 	channels - channels, that used in project versioning. channels ODER IS IMPORTANT. low index more priority
+
+	validateFilesNamesRegex - match with any regex file is valid, if nil .*GOOS_GOARCH.* is used
 */
-func NewApplicationConfig(version string, channels []Channel) (*applicationConfig, error) {
+func NewApplicationConfig(version string, channels []Channel, validateFilesNamesRegex []*regexp.Regexp) (*applicationConfig, error) {
 	cfg := applicationConfig{
 		channels: channels,
 	}
@@ -84,7 +90,11 @@ func NewApplicationConfig(version string, channels []Channel) (*applicationConfi
 	if curVersion != nil {
 		cfg.currentVersion = *curVersion
 	}
-	return &cfg, err
+	if validateFilesNamesRegex == nil {
+		validateFilesNamesRegex = []*regexp.Regexp{defaultValidFileNameRegex}
+	}
+	cfg.ValidateFilesNamesRegexes = validateFilesNamesRegex
+	return &cfg, nil
 }
 
 func (ac *applicationConfig) isReleaseChannelOnlyMod() bool {
@@ -128,5 +138,5 @@ func (ac *applicationConfig) getReleaseChannel() *Channel {
 
 type UpdateConfig struct {
 	ApplicationConfig applicationConfig
-	Sources           []UpdateSource
+	Sources           []UpdateSource // source oder is source PRIORITY, response from first
 }

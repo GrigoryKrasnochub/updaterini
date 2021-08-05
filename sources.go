@@ -3,6 +3,7 @@ package updaterini
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,10 @@ import (
 	"time"
 )
 
+var ErrorResponseCodeIsNotOK = errors.New("error. response code is not OK")
+
 type UpdateSource interface {
+	GetSourceLabel() string
 	getSourceVersions(cfg applicationConfig) ([]Version, error)
 }
 
@@ -18,6 +22,10 @@ type UpdateSourceGitRepo struct {
 	UserName            string
 	RepoName            string
 	PersonalAccessToken string // ONLY FOR DEBUG PURPOSE
+}
+
+func (sGit *UpdateSourceGitRepo) GetSourceLabel() string {
+	return "SourceGitRepo"
 }
 
 func (sGit *UpdateSourceGitRepo) getSourceUrl(cfg applicationConfig) string {
@@ -86,6 +94,55 @@ func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg applicationConfig, fileId in
 	return resp.Body, nil
 }
 
+type UpdateSourceServer struct {
+	UpdatesMapURL string
+}
+
+func (sServ *UpdateSourceServer) GetSourceLabel() string {
+	return "SourceServer"
+}
+
+func (sServ *UpdateSourceServer) getSourceVersions(cfg applicationConfig) ([]Version, error) {
+	resp, err := doGetRequest(sServ.UpdatesMapURL, cfg, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, nil
+	}
+	defer func() {
+		if resp != nil {
+			err = resp.Body.Close()
+		}
+	}()
+	var sData []servData
+	jD := json.NewDecoder(resp.Body)
+	err = jD.Decode(&sData)
+	if err != nil {
+		return nil, err
+	}
+	var resultVersions []Version
+	for _, data := range sData {
+		version, err := newVersionServ(cfg, data, *sServ)
+		if err != nil {
+			if cfg.ShowPrepareVersionErr {
+				return nil, err
+			}
+			continue
+		}
+		resultVersions = append(resultVersions, version)
+	}
+	return resultVersions, nil
+}
+
+func (sServ *UpdateSourceServer) loadSourceFile(cfg applicationConfig, serverFolderUrl, filename string) (io.ReadCloser, error) {
+	resp, err := doGetRequest(serverFolderUrl+filename, cfg, nil, map[int]interface{}{200: struct{}{}})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
 const readTimeout = 30 * time.Minute
 
 var insecureHTTP = &http.Client{
@@ -111,7 +168,7 @@ func doGetRequest(url string, appConfig applicationConfig, customHeaders map[str
 		return nil, err
 	}
 	if _, ok := okCodes[resp.StatusCode]; !(len(okCodes) == 0 && resp.StatusCode == 200) && !ok {
-		return nil, err
+		return nil, ErrorResponseCodeIsNotOK
 	}
 	return resp, nil
 }

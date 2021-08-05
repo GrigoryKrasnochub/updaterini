@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	UpdateExeFile()
+	updateExeFile()
 }
 
 /*
@@ -18,14 +18,20 @@ func main() {
 
 	examples.exe would be updated to last release in updaterini_example rep
 */
-func UpdateExeFile() {
-	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)})
+func updateExeFile() {
+	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)}, nil)
 	if err != nil {
 		panic(err)
 	}
 	update := updaterini.UpdateConfig{
 		ApplicationConfig: *appConf,
 		Sources: []updaterini.UpdateSource{
+			&updaterini.UpdateSourceServer{
+				UpdatesMapURL: "http://unexistedServer/example.json",
+			},
+			&updaterini.UpdateSourceServer{
+				UpdatesMapURL: "http://example/example.json",
+			},
 			&updaterini.UpdateSourceGitRepo{
 				UserName: "GrigoryKrasnochub",
 				RepoName: "updaterini_example",
@@ -33,10 +39,11 @@ func UpdateExeFile() {
 		},
 	}
 
-	version, err := update.CheckForUpdates()
-	if err != nil {
-		panic(err)
-	}
+	version := update.CheckForUpdatesWithErrCallback(func(err error, source updaterini.UpdateSource, sourceIndex int) error {
+		print(source.GetSourceLabel(), " ")
+		println(err.Error())
+		return nil
+	})
 
 	if version != nil {
 		fmt.Println("Start Update!")
@@ -64,8 +71,8 @@ func UpdateExeFile() {
 	}
 }
 
-func SimpleVersionFileLoad() {
-	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)})
+func simpleVersionFileLoad() {
+	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)}, nil)
 	if err != nil {
 		panic(err)
 	}

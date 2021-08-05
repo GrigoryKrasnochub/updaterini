@@ -1,0 +1,13 @@
+[
+  {
+    "folder_url": "http://example/versions/release/1.0.1/",
+    "name": "someName",
+    "description": "some description",
+    "version": "v1.0.1",
+    "assets": [
+      {
+        "filename": "v1.0.1_windows_amd64.exe"
+      }
+    ]
+  }
+]
