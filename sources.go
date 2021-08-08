@@ -1,7 +1,6 @@
 package updaterini
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,25 +13,23 @@ import (
 var ErrorResponseCodeIsNotOK = errors.New("error. response code is not OK")
 
 type UpdateSource interface {
-	GetSourceLabel() string
-	getSourceVersions(cfg applicationConfig) ([]Version, error)
+	SourceLabel() string
+	getSourceVersions(cfg ApplicationConfig) ([]Version, error)
 }
 
 type UpdateSourceGitRepo struct {
-	UserName            string
-	RepoName            string
-	PersonalAccessToken string // ONLY FOR DEBUG PURPOSE
+	UserName                 string
+	RepoName                 string
+	SkipGitReleaseDraftCheck bool   // on true releases marked as draft won't be skipped
+	PersonalAccessToken      string // ONLY FOR DEBUG PURPOSE
 }
 
-func (sGit *UpdateSourceGitRepo) GetSourceLabel() string {
+func (sGit *UpdateSourceGitRepo) SourceLabel() string {
 	return "SourceGitRepo"
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceUrl(cfg applicationConfig) string {
+func (sGit *UpdateSourceGitRepo) getSourceUrl() string {
 	link := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", sGit.UserName, sGit.RepoName)
-	if cfg.isReleaseChannelOnlyMod() {
-		link += "/latest"
-	}
 	return link
 }
 
@@ -41,32 +38,22 @@ func (sGit *UpdateSourceGitRepo) getLoadFileUrl(fileId int) string {
 	return link
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Version, error) {
-	resp, err := doGetRequest(sGit.getSourceUrl(cfg), cfg, nil, nil)
+func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, err error) {
+	resp, err := doGetRequest(sGit.getSourceUrl(), cfg, nil, nil)
 	if err != nil {
 		return nil, err
-	}
-	if resp == nil {
-		return nil, nil
 	}
 	defer func() {
-		if resp != nil {
-			err = resp.Body.Close()
+		tmpErr := resp.Body.Close()
+		if err == nil {
+			err = tmpErr
 		}
 	}()
-	jD := json.NewDecoder(resp.Body)
 	var data []gitData
-	if cfg.isReleaseChannelOnlyMod() {
-		var tmpData gitData
-		err = jD.Decode(&tmpData)
-		data = append(data, tmpData)
-	} else {
-		err = jD.Decode(&data)
-	}
+	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
 		return nil, err
 	}
-	var resultVersions []Version
 	for _, gData := range data {
 		gVersion, err := newVersionGit(cfg, gData, *sGit)
 		if err != nil {
@@ -75,12 +62,12 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg applicationConfig) ([]Ver
 			}
 			continue
 		}
-		resultVersions = append(resultVersions, gVersion)
+		resultVersions = append(resultVersions, &gVersion)
 	}
-	return resultVersions, nil
+	return resultVersions, err
 }
 
-func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg applicationConfig, fileId int) (io.ReadCloser, error) {
+func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg ApplicationConfig, fileId int) (io.ReadCloser, error) {
 	customHeaders := make(map[string]string, 2)
 	customHeaders["Accept"] = "application/octet-stream"
 	if sGit.PersonalAccessToken != "" {
@@ -98,30 +85,26 @@ type UpdateSourceServer struct {
 	UpdatesMapURL string
 }
 
-func (sServ *UpdateSourceServer) GetSourceLabel() string {
+func (sServ *UpdateSourceServer) SourceLabel() string {
 	return "SourceServer"
 }
 
-func (sServ *UpdateSourceServer) getSourceVersions(cfg applicationConfig) ([]Version, error) {
+func (sServ *UpdateSourceServer) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, err error) {
 	resp, err := doGetRequest(sServ.UpdatesMapURL, cfg, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	if resp == nil {
-		return nil, nil
-	}
 	defer func() {
-		if resp != nil {
-			err = resp.Body.Close()
+		tmpErr := resp.Body.Close()
+		if err == nil {
+			err = tmpErr
 		}
 	}()
-	var sData []servData
-	jD := json.NewDecoder(resp.Body)
-	err = jD.Decode(&sData)
+	var sData []ServData
+	err = json.NewDecoder(resp.Body).Decode(&sData)
 	if err != nil {
 		return nil, err
 	}
-	var resultVersions []Version
 	for _, data := range sData {
 		version, err := newVersionServ(cfg, data, *sServ)
 		if err != nil {
@@ -130,12 +113,12 @@ func (sServ *UpdateSourceServer) getSourceVersions(cfg applicationConfig) ([]Ver
 			}
 			continue
 		}
-		resultVersions = append(resultVersions, version)
+		resultVersions = append(resultVersions, &version)
 	}
-	return resultVersions, nil
+	return resultVersions, err
 }
 
-func (sServ *UpdateSourceServer) loadSourceFile(cfg applicationConfig, serverFolderUrl, filename string) (io.ReadCloser, error) {
+func (sServ *UpdateSourceServer) loadSourceFile(cfg ApplicationConfig, serverFolderUrl, filename string) (io.ReadCloser, error) {
 	resp, err := doGetRequest(serverFolderUrl+filename, cfg, nil, map[int]interface{}{200: struct{}{}})
 	if err != nil {
 		return nil, err
@@ -143,31 +126,29 @@ func (sServ *UpdateSourceServer) loadSourceFile(cfg applicationConfig, serverFol
 	return resp.Body, nil
 }
 
-const readTimeout = 30 * time.Minute
-
-var insecureHTTP = &http.Client{
-	Timeout: readTimeout,
+var reqHTTP = &http.Client{
+	Timeout: 5 * time.Minute,
 	Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
+		TLSHandshakeTimeout:   5 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	},
 }
 
-func doGetRequest(url string, appConfig applicationConfig, customHeaders map[string]string, okCodes map[int]interface{}) (*http.Response, error) {
+func doGetRequest(url string, appConfig ApplicationConfig, customHeaders map[string]string, okCodes map[int]interface{}) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", fmt.Sprintf(`updaterini %s (%s %s-%s)`, appConfig.currentVersion.getVersion().String(), runtime.Version(), runtime.GOOS, runtime.GOARCH))
+	req.Header.Set("User-Agent", fmt.Sprintf(`updaterini %s (%s %s-%s)`, appConfig.currentVersion.version.String(), runtime.Version(), runtime.GOOS, runtime.GOARCH))
 	for key, customHeader := range customHeaders {
 		req.Header.Set(key, customHeader)
 	}
-	resp, err := insecureHTTP.Do(req)
+	resp, err := reqHTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := okCodes[resp.StatusCode]; !(len(okCodes) == 0 && resp.StatusCode == 200) && !ok {
+	if _, ok := okCodes[resp.StatusCode]; (len(okCodes) != 0 || resp.StatusCode != 200) && !ok {
+		_ = resp.Body.Close()
 		return nil, ErrorResponseCodeIsNotOK
 	}
 	return resp, nil

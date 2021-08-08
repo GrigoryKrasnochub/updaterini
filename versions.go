@@ -3,6 +3,7 @@ package updaterini
 import (
 	"errors"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,14 +11,13 @@ import (
 )
 
 var (
-	ErrorUndefinedChannel                 = errors.New("channel is undefined")
 	ErrorVersionParseErrNumericPreRelease = errors.New("version parse err: numeric pre-release branches are unsupported")
 	ErrorVersionParseErrNoChannel         = errors.New("version parse err: can't find channel")
 	ErrorVersionInvalid                   = errors.New("version is invalid")
 )
 
-func isVersionFilenameCorrect(filename string, cfg applicationConfig) bool {
-	for _, regex := range cfg.ValidateFilesNamesRegexes {
+func isVersionFilenameCorrect(filename string, filenameRegex []*regexp.Regexp) bool {
+	for _, regex := range filenameRegex {
 		if regex.MatchString(filename) {
 			return true
 		}
@@ -28,35 +28,39 @@ func isVersionFilenameCorrect(filename string, cfg applicationConfig) bool {
 type Version interface {
 	getVersion() semver.Version
 	getChannel() Channel
-	getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error
-	GetVersionName() string
-	GetVersionDescription() string
+	getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error
+	VersionName() string
+	VersionDescription() string
 }
 
-func getLatestVersion(cfg applicationConfig, versions []Version) (*Version, *int) {
+func getLatestVersion(cfg ApplicationConfig, versions []Version) (Version, *int) {
 	maxVersionIndex := -1
-	maxVersion := prepareVersionForComparison(cfg.currentVersion.getChannel(), cfg.currentVersion.getVersion())
+	maxVersion := prepareVersionForComparison(cfg.currentVersion.version)
+	maxVersionChanWeight := cfg.currentVersion.channel.weight
 	for i := 0; i < len(versions); i++ {
-		if !versions[i].getChannel().useForUpdate {
+		verChan := versions[i].getChannel()
+		if !verChan.useForUpdate {
 			continue
 		}
-		prepVersion := prepareVersionForComparison(versions[i].getChannel(), versions[i].getVersion())
-		if prepVersion.Compare(maxVersion) == 1 {
+		verChanWeight := versions[i].getChannel().weight
+		prepVersion := prepareVersionForComparison(versions[i].getVersion())
+		if compareResult := prepVersion.Compare(maxVersion); compareResult == 1 || (maxVersionChanWeight < verChanWeight && compareResult == 0) {
 			maxVersionIndex = i
 			maxVersion = prepVersion
+			maxVersionChanWeight = verChanWeight
 		}
 	}
 	if maxVersionIndex == -1 {
 		return nil, nil
 	}
-	return &versions[maxVersionIndex], &maxVersionIndex
+	return versions[maxVersionIndex], &maxVersionIndex
 }
 
-func prepareVersionForComparison(channel Channel, version semver.Version) semver.Version {
+func prepareVersionForComparison(version semver.Version) semver.Version {
 	if len(version.Pre) > 0 {
-		version.Pre[0].VersionNum = uint64(channel.weight)
-		version.Pre[0].VersionStr = ""
-		version.Pre[0].IsNum = true
+		version.Pre = version.Pre[1:]
+		// for preventing change Pre version to release
+		version.Pre = append(version.Pre, semver.PRVersion{VersionNum: 0, IsNum: true})
 	}
 	return version
 }
@@ -65,28 +69,28 @@ func prepareVersionString(version string) string {
 	return strings.TrimLeft(strings.TrimSpace(version), "v")
 }
 
-func parseVersion(cfg applicationConfig, version string) (*semver.Version, *Channel, error) {
+func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channel, error) {
 	version = prepareVersionString(version)
 	parsedVersion, err := semver.Parse(version)
 	if err != nil {
-		return nil, nil, err
+		return parsedVersion, Channel{}, err
 	}
 	if len(parsedVersion.Pre) == 0 {
 		rChan := cfg.getReleaseChannel()
 		if rChan != nil {
-			return &parsedVersion, rChan, nil
+			return parsedVersion, *rChan, nil
 		}
-		return &parsedVersion, nil, ErrorVersionParseErrNoChannel
+		return parsedVersion, Channel{}, ErrorVersionParseErrNoChannel
 	}
 	if parsedVersion.Pre[0].IsNum {
-		return &parsedVersion, nil, ErrorVersionParseErrNumericPreRelease
+		return parsedVersion, Channel{}, ErrorVersionParseErrNumericPreRelease
 	}
 	for _, channel := range cfg.channels {
-		if channel.Name == parsedVersion.Pre[0].VersionStr {
-			return &parsedVersion, &channel, nil
+		if channel.name == parsedVersion.Pre[0].VersionStr {
+			return parsedVersion, channel, nil
 		}
 	}
-	return &parsedVersion, nil, ErrorVersionParseErrNoChannel
+	return parsedVersion, Channel{}, ErrorVersionParseErrNoChannel
 }
 
 type gitData struct {
@@ -111,51 +115,47 @@ type versionGit struct {
 	version semver.Version
 }
 
-func newVersionGit(cfg applicationConfig, data gitData, src UpdateSourceGitRepo) (*versionGit, error) {
-	vG := &versionGit{
+func newVersionGit(cfg ApplicationConfig, data gitData, src UpdateSourceGitRepo) (versionGit, error) {
+	vG := versionGit{
 		data: data,
 	}
-	if !vG.isValid(cfg) {
-		return nil, ErrorVersionInvalid
+	if !vG.isValid(cfg.ValidateFilesNamesRegexes) {
+		return versionGit{}, ErrorVersionInvalid
 	}
-	vG.cleanUnusedAssets(cfg)
+	vG.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
 	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
-		return nil, err
+		return versionGit{}, err
 	}
-	vG.version = *version
-	vG.channel = *channel
+	vG.version = version
+	vG.channel = channel
 	vG.source = src
 	return vG, nil
 }
 
-func (vG *versionGit) GetVersionName() string {
+func (vG *versionGit) VersionName() string {
 	return vG.data.Name
 }
 
-func (vG *versionGit) GetVersionDescription() string {
+func (vG *versionGit) VersionDescription() string {
 	return vG.data.Description
 }
 
-func (vG *versionGit) isValid(cfg applicationConfig) bool {
-	release := true
-	if vG.data.Prerelease {
-		release = !cfg.isReleaseChannelOnlyMod()
-	}
+func (vG *versionGit) isValid(filenameRegex []*regexp.Regexp) bool {
 	files := false
 	for _, gitAsset := range vG.data.Assets {
-		if isVersionFilenameCorrect(gitAsset.Filename, cfg) {
+		if isVersionFilenameCorrect(gitAsset.Filename, filenameRegex) {
 			files = true
 			break
 		}
 	}
-	return !vG.data.Draft && release && files
+	return (vG.source.SkipGitReleaseDraftCheck || !vG.data.Draft) && files
 }
 
-func (vG *versionGit) cleanUnusedAssets(cfg applicationConfig) {
+func (vG *versionGit) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
 	assetsCounter := 0
 	for _, asset := range vG.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, cfg) {
+		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
 			vG.data.Assets[assetsCounter] = asset
 			assetsCounter++
 		}
@@ -171,7 +171,7 @@ func (vG *versionGit) getChannel() Channel {
 	return vG.channel
 }
 
-func (vG *versionGit) getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
+func (vG *versionGit) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
 	for _, asset := range vG.data.Assets {
 		reader, err := vG.source.loadSourceFile(cfg, asset.Id)
 		if err != nil {
@@ -179,6 +179,7 @@ func (vG *versionGit) getAssetsFilesContent(cfg applicationConfig, processFileCo
 		}
 		err = processFileContent(reader, asset.Filename)
 		if err != nil {
+			_ = reader.Close()
 			return err
 		}
 		err = reader.Close()
@@ -189,47 +190,7 @@ func (vG *versionGit) getAssetsFilesContent(cfg applicationConfig, processFileCo
 	return nil
 }
 
-type versionCurrent struct {
-	channel Channel
-	version semver.Version
-}
-
-func newVersionCurrent(cfg applicationConfig, version string) (*versionCurrent, error) {
-	pVersion, channel, err := parseVersion(cfg, version)
-	if err != nil {
-		return nil, err
-	}
-	curVer := &versionCurrent{
-		version: *pVersion,
-	}
-	if channel == nil {
-		return nil, ErrorUndefinedChannel
-	}
-	curVer.channel = *channel
-	return curVer, nil
-}
-
-func (vC *versionCurrent) GetVersionName() string {
-	return ""
-}
-
-func (vC *versionCurrent) GetVersionDescription() string {
-	return ""
-}
-
-func (vC *versionCurrent) getVersion() semver.Version {
-	return vC.version
-}
-
-func (vC *versionCurrent) getChannel() Channel {
-	return vC.channel
-}
-
-func (vC *versionCurrent) getAssetsFilesContent(applicationConfig, func(reader io.Reader, filename string) error) error {
-	return nil
-}
-
-type servData struct {
+type ServData struct {
 	VersionFolderUrl string `json:"folder_url"`
 	Name             string
 	Description      string
@@ -240,52 +201,52 @@ type servData struct {
 }
 
 type versionServ struct {
-	data    servData
+	data    ServData
 	channel Channel
 	source  UpdateSourceServer
 	version semver.Version
 }
 
-func newVersionServ(cfg applicationConfig, data servData, src UpdateSourceServer) (*versionServ, error) {
+func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer) (versionServ, error) {
 	vS := versionServ{
 		data: data,
 	}
-	if !vS.isValid(cfg) {
-		return nil, ErrorVersionInvalid
+	if !vS.isValid(cfg.ValidateFilesNamesRegexes) {
+		return versionServ{}, ErrorVersionInvalid
 	}
-	vS.cleanUnusedAssets(cfg)
+	vS.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
 
 	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
-		return nil, err
+		return versionServ{}, err
 	}
-	vS.version = *version
-	vS.channel = *channel
+	vS.version = version
+	vS.channel = channel
 	vS.source = src
-	return &vS, nil
+	return vS, nil
 }
 
-func (vS *versionServ) GetVersionName() string {
+func (vS *versionServ) VersionName() string {
 	return vS.data.Name
 }
 
-func (vS *versionServ) GetVersionDescription() string {
+func (vS *versionServ) VersionDescription() string {
 	return vS.data.Description
 }
 
-func (vS *versionServ) isValid(cfg applicationConfig) bool {
+func (vS *versionServ) isValid(filenameRegex []*regexp.Regexp) bool {
 	for _, asset := range vS.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, cfg) {
+		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
 			return true
 		}
 	}
 	return false
 }
 
-func (vS *versionServ) cleanUnusedAssets(cfg applicationConfig) {
+func (vS *versionServ) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
 	assetsCounter := 0
 	for _, asset := range vS.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, cfg) {
+		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
 			vS.data.Assets[assetsCounter] = asset
 			assetsCounter++
 		}
@@ -301,7 +262,7 @@ func (vS *versionServ) getChannel() Channel {
 	return vS.channel
 }
 
-func (vS *versionServ) getAssetsFilesContent(cfg applicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
+func (vS *versionServ) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
 	for _, asset := range vS.data.Assets {
 		reader, err := vS.source.loadSourceFile(cfg, vS.data.VersionFolderUrl, asset.Filename)
 		if err != nil {
@@ -309,6 +270,7 @@ func (vS *versionServ) getAssetsFilesContent(cfg applicationConfig, processFileC
 		}
 		err = processFileContent(reader, asset.Filename)
 		if err != nil {
+			_ = reader.Close()
 			return err
 		}
 		err = reader.Close()

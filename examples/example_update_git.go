@@ -19,12 +19,12 @@ func main() {
 	examples.exe would be updated to last release in updaterini_example rep
 */
 func updateExeFile() {
-	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)}, nil)
+	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.NewReleaseChannel(true)}, nil)
 	if err != nil {
 		panic(err)
 	}
 	update := updaterini.UpdateConfig{
-		ApplicationConfig: *appConf,
+		ApplicationConfig: appConf,
 		Sources: []updaterini.UpdateSource{
 			&updaterini.UpdateSourceServer{
 				UpdatesMapURL: "http://unexistedServer/example.json",
@@ -40,15 +40,19 @@ func updateExeFile() {
 	}
 
 	version := update.CheckForUpdatesWithErrCallback(func(err error, source updaterini.UpdateSource, sourceIndex int) error {
-		print(source.GetSourceLabel(), " ")
-		println(err.Error())
+		switch source.(type) {
+		case *updaterini.UpdateSourceGitRepo:
+			fmt.Println("GitSourceErr ", err)
+		case *updaterini.UpdateSourceServer:
+			fmt.Println("ServerSourceErr ", err)
+		}
 		return nil
 	})
 
 	if version != nil {
 		fmt.Println("Start Update!")
 		counter := 0
-		updateResult, err := update.DoUpdate(*version, "", func(loadedFilename string) (string, error) {
+		updateResult, err := update.DoUpdate(version, "", func(loadedFilename string) (string, error) {
 			if strings.HasSuffix(loadedFilename, ".exe") {
 				exec, _ := os.Executable()
 				return filepath.Base(exec), nil // current exe file will be replaced
@@ -72,12 +76,12 @@ func updateExeFile() {
 }
 
 func simpleVersionFileLoad() {
-	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.GetReleaseChanel(true)}, nil)
+	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.NewReleaseChannel(true)}, nil)
 	if err != nil {
 		panic(err)
 	}
 	update := updaterini.UpdateConfig{
-		ApplicationConfig: *appConf,
+		ApplicationConfig: appConf,
 		Sources: []updaterini.UpdateSource{
 			&updaterini.UpdateSourceGitRepo{
 				UserName: "GrigoryKrasnochub",
@@ -95,7 +99,7 @@ func simpleVersionFileLoad() {
 		fmt.Println("Start Update!")
 
 		// load file to your build dir
-		err = update.LoadFilesToDir(*version, "")
+		err = update.LoadFilesToDir(version, "")
 		if err != nil {
 			panic(err)
 		}
