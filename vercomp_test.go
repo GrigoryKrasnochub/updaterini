@@ -11,12 +11,12 @@ type versionTest struct {
 	isMaxVersion bool
 }
 
-func testLatestVersionSearch(curVersion versionTest, channels []Channel, versionTests []versionTest, t *testing.T) {
+func testLatestVersionSearch(curVersion versionTest, channels []Channel, testVers []versionTest, t *testing.T) {
 	maxVersionsCounter := 0
 	if curVersion.isMaxVersion {
 		maxVersionsCounter += 1
 	}
-	for _, vTest := range versionTests {
+	for _, vTest := range testVers {
 		if vTest.isMaxVersion {
 			maxVersionsCounter += 1
 		}
@@ -30,9 +30,9 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 		t.Errorf("creating new version err: %s", err)
 	}
 	versions := make([]Version, 0)
-	for _, vTest := range versionTests {
+	for _, testVer := range testVers {
 		ver, err := newVersionGit(cfg, gitData{
-			Version: vTest.version,
+			Version: testVer.version,
 			Assets: []struct {
 				Size     int
 				Id       int
@@ -52,13 +52,17 @@ func testLatestVersionSearch(curVersion versionTest, channels []Channel, version
 		}
 		versions = append(versions, &ver)
 	}
-	ver, index := getLatestVersion(cfg, versions)
-	_ = ver
-	if index == nil && !curVersion.isMaxVersion {
-		t.Errorf("wrong max version release is not max version")
+	ver := getLatestVersion(cfg, versions)
+	if ver == nil && curVersion.isMaxVersion {
+		return
 	}
-	if index != nil && !versionTests[*index].isMaxVersion {
-		t.Errorf("wrong max version index: %d", *index)
+	for index, testVer := range testVers {
+		if testVer.isMaxVersion && testVer.version != ver.VersionTag() {
+			t.Errorf("compare test version err: max version is not max")
+		}
+		if !testVer.isMaxVersion && testVer.version == ver.VersionTag() {
+			t.Errorf("compare test version err: not max version is max. max index:%d. max version tag:%s", index, testVer.version)
+		}
 	}
 }
 

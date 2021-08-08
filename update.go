@@ -31,7 +31,7 @@ func (uc *UpdateConfig) CheckAllSourcesForUpdates() (Version, error) {
 		}
 		versions = append(versions, sVersions...)
 	}
-	ver, _ := getLatestVersion(uc.ApplicationConfig, versions)
+	ver := getLatestVersion(uc.ApplicationConfig, versions)
 	return ver, nil
 }
 
@@ -66,7 +66,7 @@ func (uc *UpdateConfig) CheckForUpdatesWithErrCallback(catchError func(err error
 			}
 			continue
 		}
-		version, _ := getLatestVersion(uc.ApplicationConfig, sVersions)
+		version := getLatestVersion(uc.ApplicationConfig, sVersions)
 		return version
 	}
 

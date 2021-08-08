@@ -30,10 +30,11 @@ type Version interface {
 	getChannel() Channel
 	getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error
 	VersionName() string
+	VersionTag() string
 	VersionDescription() string
 }
 
-func getLatestVersion(cfg ApplicationConfig, versions []Version) (Version, *int) {
+func getLatestVersion(cfg ApplicationConfig, versions []Version) Version {
 	maxVersionIndex := -1
 	maxVersion := prepareVersionForComparison(cfg.currentVersion.version)
 	maxVersionChanWeight := cfg.currentVersion.channel.weight
@@ -51,9 +52,9 @@ func getLatestVersion(cfg ApplicationConfig, versions []Version) (Version, *int)
 		}
 	}
 	if maxVersionIndex == -1 {
-		return nil, nil
+		return nil
 	}
-	return versions[maxVersionIndex], &maxVersionIndex
+	return versions[maxVersionIndex]
 }
 
 func prepareVersionForComparison(version semver.Version) semver.Version {
@@ -137,6 +138,10 @@ func (vG *versionGit) VersionName() string {
 	return vG.data.Name
 }
 
+func (vG *versionGit) VersionTag() string {
+	return vG.data.Version
+}
+
 func (vG *versionGit) VersionDescription() string {
 	return vG.data.Description
 }
@@ -191,12 +196,12 @@ func (vG *versionGit) getAssetsFilesContent(cfg ApplicationConfig, processFileCo
 }
 
 type ServData struct {
-	VersionFolderUrl string `json:"folder_url"`
-	Name             string
-	Description      string
-	Version          string
-	Assets           []struct {
-		Filename string
+	VersionFolderUrl string     `json:"folder_url"` // version folder url
+	Name             string     // release summary
+	Description      string     // release description
+	Version          string     // version tag
+	Assets           []struct { // version files
+		Filename string // version files filenames, filenames adds to VersionFolderUrl
 	}
 }
 
@@ -228,6 +233,10 @@ func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer
 
 func (vS *versionServ) VersionName() string {
 	return vS.data.Name
+}
+
+func (vS *versionServ) VersionTag() string {
+	return vS.data.Version
 }
 
 func (vS *versionServ) VersionDescription() string {
