@@ -1,7 +1,7 @@
 package updaterini
 
 import (
-	"errors"
+	"fmt"
 	"io"
 	"regexp"
 	"strings"
@@ -10,10 +10,10 @@ import (
 	"github.com/blang/semver/v4"
 )
 
-var (
-	ErrorVersionParseErrNumericPreRelease = errors.New("version parse err: numeric pre-release branches are unsupported")
-	ErrorVersionParseErrNoChannel         = errors.New("version parse err: can't find channel")
-	ErrorVersionInvalid                   = errors.New("version is invalid")
+const (
+	errorVersionParseErrNumericPreRelease = "version parse err: numeric pre-release branches are unsupported"
+	errorVersionParseErrNoChannel         = "version parse err: can't find channel"
+	errorVersionInvalid                   = "version is invalid"
 )
 
 func isVersionFilenameCorrect(filename string, filenameRegex []*regexp.Regexp) bool {
@@ -74,24 +74,24 @@ func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channe
 	version = prepareVersionString(version)
 	parsedVersion, err := semver.Parse(version)
 	if err != nil {
-		return parsedVersion, Channel{}, err
+		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, err)
 	}
 	if len(parsedVersion.Pre) == 0 {
 		rChan := cfg.getReleaseChannel()
 		if rChan != nil {
 			return parsedVersion, *rChan, nil
 		}
-		return parsedVersion, Channel{}, ErrorVersionParseErrNoChannel
+		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
 	}
 	if parsedVersion.Pre[0].IsNum {
-		return parsedVersion, Channel{}, ErrorVersionParseErrNumericPreRelease
+		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNumericPreRelease)
 	}
 	for _, channel := range cfg.channels {
 		if channel.name == parsedVersion.Pre[0].VersionStr {
 			return parsedVersion, channel, nil
 		}
 	}
-	return parsedVersion, Channel{}, ErrorVersionParseErrNoChannel
+	return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
 }
 
 type gitData struct {
@@ -121,7 +121,7 @@ func newVersionGit(cfg ApplicationConfig, data gitData, src UpdateSourceGitRepo)
 		data: data,
 	}
 	if !vG.isValid(cfg.ValidateFilesNamesRegexes) {
-		return versionGit{}, ErrorVersionInvalid
+		return versionGit{}, fmt.Errorf("%s: %s", data.Version, errorVersionInvalid)
 	}
 	vG.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
 	version, channel, err := parseVersion(cfg, data.Version)
@@ -217,7 +217,7 @@ func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer
 		data: data,
 	}
 	if !vS.isValid(cfg.ValidateFilesNamesRegexes) {
-		return versionServ{}, ErrorVersionInvalid
+		return versionServ{}, fmt.Errorf("%s: %s", data.Version, errorVersionInvalid)
 	}
 	vS.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
 

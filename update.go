@@ -19,58 +19,39 @@ const oldVersionRollbackFilesExtension = oldVersionReplacedFilesExtension + vers
 /*
 	looking for new version in defined sources
 */
-func (uc *UpdateConfig) CheckAllSourcesForUpdates() (Version, error) {
+func (uc *UpdateConfig) CheckAllSourcesForUpdates() (Version, SourceCheckStatus) {
 	var versions []Version
+	var checkStatus SourceCheckStatus
 	for _, source := range uc.Sources {
-		sVersions, err := source.getSourceVersions(uc.ApplicationConfig)
-		if err != nil {
-			if uc.ApplicationConfig.ShowPrepareVersionErr {
-				return nil, err
-			}
+		sVersions, srcStatus := source.getSourceVersions(uc.ApplicationConfig)
+		checkStatus.SourcesStatuses = append(checkStatus.SourcesStatuses, srcStatus)
+		if srcStatus.Status == CheckFailure {
 			continue
 		}
 		versions = append(versions, sVersions...)
 	}
+	checkStatus.updateSourceCheckStatus()
 	ver := getLatestVersion(uc.ApplicationConfig, versions)
-	return ver, nil
+	return ver, checkStatus
 }
 
 /*
 	looking for new version in defined sources. First source response with Ok code and any versions (even nil) will stop any other attempt to check other sources
 */
-func (uc *UpdateConfig) CheckForUpdates() (Version, error) {
-	var err error
-	version := uc.CheckForUpdatesWithErrCallback(func(innerErr error, source UpdateSource, sourceIndex int) error {
-		if uc.ApplicationConfig.ShowPrepareVersionErr {
-			// TODO working with errors is painful. Versioning Errors near to real errors...
-			err = innerErr
-			return innerErr
-		}
-		return nil
-	})
-	return version, err
-}
-
-/*
-	looking for new version in defined sources. First source response with 200 code and any versions (even nil) will stop any other attempt to check other sources
-	return trigger callback on EVERY ERROR in THIS FUNC. Return err from callback to stop func execution
-*/
-func (uc *UpdateConfig) CheckForUpdatesWithErrCallback(catchError func(err error, source UpdateSource, sourceIndex int) error) Version {
-	// TODO do same (return errors) with array
-	for sourceIndex, source := range uc.Sources {
-		sVersions, err := source.getSourceVersions(uc.ApplicationConfig)
-		if err != nil {
-			err := catchError(err, source, sourceIndex)
-			if err != nil {
-				return nil
-			}
+func (uc *UpdateConfig) CheckForUpdates() (Version, SourceCheckStatus) {
+	var checkStatus SourceCheckStatus
+	for _, source := range uc.Sources {
+		sVersion, srcStatus := source.getSourceVersions(uc.ApplicationConfig)
+		checkStatus.SourcesStatuses = append(checkStatus.SourcesStatuses, srcStatus)
+		if srcStatus.Status == CheckFailure {
 			continue
 		}
-		version := getLatestVersion(uc.ApplicationConfig, sVersions)
-		return version
+		version := getLatestVersion(uc.ApplicationConfig, sVersion)
+		checkStatus.updateSourceCheckStatus()
+		return version, checkStatus
 	}
-
-	return nil
+	checkStatus.updateSourceCheckStatus()
+	return nil, checkStatus
 }
 
 /*

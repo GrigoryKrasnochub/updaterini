@@ -20,6 +20,7 @@ func main() {
 */
 func updateExeFile() {
 	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.NewReleaseChannel(true)}, nil)
+	appConf.ShowPrepareVersionErr = true
 	if err != nil {
 		panic(err)
 	}
@@ -39,15 +40,24 @@ func updateExeFile() {
 		},
 	}
 
-	version := update.CheckForUpdatesWithErrCallback(func(err error, source updaterini.UpdateSource, sourceIndex int) error {
-		switch source.(type) {
-		case *updaterini.UpdateSourceGitRepo:
-			fmt.Println("GitSourceErr ", err)
-		case *updaterini.UpdateSourceServer:
-			fmt.Println("ServerSourceErr ", err)
+	version, checkStatus := update.CheckForUpdates()
+	if checkStatus.Status != updaterini.CheckFailure {
+		fmt.Println("Update errors:")
+		for _, srcStatus := range checkStatus.SourcesStatuses {
+			if srcStatus.Status != updaterini.CheckSuccess {
+				switch srcStatus.Source.(type) {
+				case *updaterini.UpdateSourceGitRepo:
+					src, _ := srcStatus.Source.(*updaterini.UpdateSourceGitRepo)
+					fmt.Printf("Source type: %s;\n Repo: %s;\n Erros: %v;\n", srcStatus.Source.SourceLabel(), src.RepoName, srcStatus.Errors)
+				case *updaterini.UpdateSourceServer:
+					src, _ := srcStatus.Source.(*updaterini.UpdateSourceServer)
+					fmt.Printf("Source type: %s;\n URL: %s;\n Erros: %v;\n", srcStatus.Source.SourceLabel(), src.UpdatesMapURL, srcStatus.Errors)
+				}
+			}
 		}
-		return nil
-	})
+	} else {
+		panic("Update failed")
+	}
 
 	if version != nil {
 		fmt.Println("Start Update!")
@@ -90,9 +100,9 @@ func simpleVersionFileLoad() {
 		},
 	}
 
-	version, err := update.CheckForUpdates()
-	if err != nil {
-		panic(err)
+	version, checkStatus := update.CheckForUpdates()
+	if checkStatus.Status == updaterini.CheckFailure {
+		panic(checkStatus.Status)
 	}
 
 	if version != nil {

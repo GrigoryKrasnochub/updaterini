@@ -12,9 +12,14 @@ import (
 
 var ErrorResponseCodeIsNotOK = errors.New("error. response code is not OK")
 
+const (
+	SourceLabelGitRepo = "SourceGitRepo"
+	SourceLabelServer  = "SourceServer"
+)
+
 type UpdateSource interface {
 	SourceLabel() string
-	getSourceVersions(cfg ApplicationConfig) ([]Version, error)
+	getSourceVersions(cfg ApplicationConfig) ([]Version, SourceStatus)
 }
 
 type UpdateSourceGitRepo struct {
@@ -25,7 +30,7 @@ type UpdateSourceGitRepo struct {
 }
 
 func (sGit *UpdateSourceGitRepo) SourceLabel() string {
-	return "SourceGitRepo"
+	return SourceLabelGitRepo
 }
 
 func (sGit *UpdateSourceGitRepo) getSourceUrl() string {
@@ -38,33 +43,36 @@ func (sGit *UpdateSourceGitRepo) getLoadFileUrl(fileId int) string {
 	return link
 }
 
-func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, err error) {
+func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, srcStatus SourceStatus) {
+	srcStatus.Source = sGit
 	resp, err := doGetRequest(sGit.getSourceUrl(), cfg, nil, nil)
 	if err != nil {
-		return nil, err
+		srcStatus.appendError(err, true)
+		return nil, srcStatus
 	}
 	defer func() {
 		tmpErr := resp.Body.Close()
-		if err == nil {
-			err = tmpErr
+		if tmpErr != nil {
+			srcStatus.appendError(tmpErr, false)
 		}
 	}()
 	var data []gitData
 	err = json.NewDecoder(resp.Body).Decode(&data)
 	if err != nil {
-		return nil, err
+		srcStatus.appendError(err, true)
+		return nil, srcStatus
 	}
 	for _, gData := range data {
 		gVersion, err := newVersionGit(cfg, gData, *sGit)
 		if err != nil {
 			if cfg.ShowPrepareVersionErr {
-				return nil, err
+				srcStatus.appendError(err, false)
 			}
 			continue
 		}
 		resultVersions = append(resultVersions, &gVersion)
 	}
-	return resultVersions, err
+	return resultVersions, srcStatus
 }
 
 func (sGit *UpdateSourceGitRepo) loadSourceFile(cfg ApplicationConfig, fileId int) (io.ReadCloser, error) {
@@ -86,36 +94,39 @@ type UpdateSourceServer struct {
 }
 
 func (sServ *UpdateSourceServer) SourceLabel() string {
-	return "SourceServer"
+	return SourceLabelServer
 }
 
-func (sServ *UpdateSourceServer) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, err error) {
+func (sServ *UpdateSourceServer) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, srcStatus SourceStatus) {
+	srcStatus.Source = sServ
 	resp, err := doGetRequest(sServ.UpdatesMapURL, cfg, nil, nil)
 	if err != nil {
-		return nil, err
+		srcStatus.appendError(err, true)
+		return nil, srcStatus
 	}
 	defer func() {
 		tmpErr := resp.Body.Close()
-		if err == nil {
-			err = tmpErr
+		if tmpErr != nil {
+			srcStatus.appendError(tmpErr, false)
 		}
 	}()
 	var sData []ServData
 	err = json.NewDecoder(resp.Body).Decode(&sData)
 	if err != nil {
-		return nil, err
+		srcStatus.appendError(err, true)
+		return nil, srcStatus
 	}
 	for _, data := range sData {
 		version, err := newVersionServ(cfg, data, *sServ)
 		if err != nil {
 			if cfg.ShowPrepareVersionErr {
-				return nil, err
+				srcStatus.appendError(err, false)
 			}
 			continue
 		}
 		resultVersions = append(resultVersions, &version)
 	}
-	return resultVersions, err
+	return resultVersions, srcStatus
 }
 
 func (sServ *UpdateSourceServer) loadSourceFile(cfg ApplicationConfig, serverFolderUrl, filename string) (io.ReadCloser, error) {
