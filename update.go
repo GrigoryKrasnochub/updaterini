@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,9 +87,18 @@ func (uc *UpdateConfig) LoadFilesToDir(ver Version, dirPath string) error {
 	return err
 }
 
+const ReplacementFileInfoUseDefaultOrExistedFilePerm = 9999
+const ReplacementFileDefaultMode = fs.FileMode(0644)
+
+type ReplacementFile struct {
+	FileName string
+	Mode     fs.FileMode // use ReplacementFileInfoUseDefaultOrExistedFilePerm to set default ReplacementFileDefaultMode or if file already exist, existed file permission
+}
+
 type updateFile struct {
-	fileName             string
+	replacement          ReplacementFile // file after replace
 	tmpFileName          string
+	curFileMode          fs.FileMode
 	curFileRenamed       bool
 	updateFileMovedToDir bool
 }
@@ -100,11 +110,11 @@ type UpdateResult struct {
 
 /*
 	Load Files -> Check hash -> doBeforeUpdate() ->
-	get file names from getReplacedFileName function, safe replace it if file exist in folder
+	get file names from getReplacementFileInfo function, safe replace it if file exist in folder
 	(curAppDir or cur exec file folder on empty string).
 	Do rollback on any trouble
 */
-func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileName func(loadedFilename string) (string, error), doBeforeUpdate func() error) (_ UpdateResult, err error) {
+func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFileInfo func(loadedFilename string) (ReplacementFile, error), doBeforeUpdate func() error) (_ UpdateResult, err error) {
 	if curAppDir == "" {
 		exePath, err := os.Executable()
 		if err != nil {
@@ -127,7 +137,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 
 	updateFilesInfo := make([]updateFile, 0)
 	err = ver.getAssetsFilesContent(uc.ApplicationConfig, func(reader io.Reader, filename string) (err error) {
-		curFileName, err := getReplacedFileName(filename)
+		replacementFileInfo, err := getReplacementFileInfo(filename)
 		if err != nil {
 			return err
 		}
@@ -143,7 +153,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 		}()
 		_, err = io.Copy(tFile, reader)
 		updateFilesInfo = append(updateFilesInfo, updateFile{
-			fileName:             curFileName,
+			replacement:          replacementFileInfo,
 			tmpFileName:          tFile.Name(),
 			curFileRenamed:       false,
 			updateFileMovedToDir: false,
@@ -173,7 +183,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 	}
 
 	for i := range updateFilesInfo {
-		curFilepath := filepath.Join(curAppDir, updateFilesInfo[i].fileName)
+		curFilepath := filepath.Join(curAppDir, updateFilesInfo[i].replacement.FileName)
 		fInfo, err := os.Stat(curFilepath)
 
 		// rename old file is exist
@@ -187,10 +197,24 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacedFileN
 				return UpdateResult{}, err
 			}
 			updateFilesInfo[i].curFileRenamed = true
+			updateFilesInfo[i].curFileMode = fInfo.Mode().Perm()
 		}
 
 		// move new file to dir
 		err = os.Rename(updateFilesInfo[i].tmpFileName, curFilepath)
+		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return UpdateResult{}, err
+		}
+		fMode := updateFilesInfo[i].replacement.Mode
+		if fMode == ReplacementFileInfoUseDefaultOrExistedFilePerm {
+			if updateFilesInfo[i].curFileRenamed {
+				fMode = updateFilesInfo[i].curFileMode
+			} else {
+				fMode = ReplacementFileDefaultMode
+			}
+		}
+		err = os.Chmod(curFilepath, fMode)
 		err = rollbackUpdateOnErr(err)
 		if err != nil {
 			return UpdateResult{}, err
@@ -237,7 +261,7 @@ func (uR *UpdateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 			if !file.curFileRenamed {
 				continue
 			}
-			curFilepath := filepath.Join(uR.updateDir, file.fileName)
+			curFilepath := filepath.Join(uR.updateDir, file.replacement.FileName)
 			err := os.Remove(curFilepath + oldVersionReplacedFilesExtension)
 			if err != nil {
 				return err
@@ -312,7 +336,7 @@ func UnsafeDeletePreviousVersionFiles(dirPath string) error {
 type RollbackResults UpdateResult
 
 /*
-	USE CAREFULLY! If prev update is not delete func rename files by extension. (CHECK oldVersionReplacedFilesExtension)
+	USE CAREFULLY! If prev update is not deleted func rename files by extension. (CHECK oldVersionReplacedFilesExtension)
 */
 func UnsafeRollbackUpdate(dirPath string) (*RollbackResults, error) {
 	uR, err := getUpdateResultByDirScan(dirPath)
@@ -355,7 +379,7 @@ func UnsafeRollbackUpdate(dirPath string) (*RollbackResults, error) {
 	}
 
 	for i, val := range uR.updateFilesInfo {
-		rbFiles[i] = rollbackFile{filePath: filepath.Join(uR.updateDir, val.fileName)}
+		rbFiles[i] = rollbackFile{filePath: filepath.Join(uR.updateDir, val.replacement.FileName)}
 
 		// .old to .oldest
 		err = os.Rename(rbFiles[i].filePath+oldVersionReplacedFilesExtension, rbFiles[i].filePath+oldVersionRollbackFilesExtension)
@@ -393,13 +417,17 @@ func (rbRes *RollbackResults) DeleteLoadedVersionFiles(mod DeleteMode, params ..
 	return uRes.DeletePreviousVersionFiles(mod, params)
 }
 
+/*
+	don't fills files mode
+*/
 func getUpdateResultByDirScan(dirPath string) (UpdateResult, error) {
 	if dirPath == "" {
 		dirPath = "."
 	}
 	type file struct {
-		hasOldVer bool
-		hasNewVer bool
+		hasOldVer   bool
+		hasNewVer   bool
+		oldVerFMode fs.FileMode
 	}
 	files := make(map[string]*file)
 	err := filepath.Walk(dirPath,
@@ -421,6 +449,7 @@ func getUpdateResultByDirScan(dirPath string) (UpdateResult, error) {
 			isOld := strings.HasSuffix(info.Name(), oldVersionReplacedFilesExtension)
 			if isOld {
 				files[relFilePath].hasOldVer = true
+				files[relFilePath].oldVerFMode = info.Mode()
 			} else {
 				files[relFilePath].hasNewVer = true
 			}
@@ -433,8 +462,12 @@ func getUpdateResultByDirScan(dirPath string) (UpdateResult, error) {
 	for fName, val := range files {
 		if val.hasOldVer && val.hasNewVer {
 			updFileInfo = append(updFileInfo, updateFile{
-				fileName:             fName,
+				replacement: ReplacementFile{
+					FileName: fName,
+					Mode:     ReplacementFileInfoUseDefaultOrExistedFilePerm,
+				},
 				tmpFileName:          "",
+				curFileMode:          val.oldVerFMode,
 				curFileRenamed:       true,
 				updateFileMovedToDir: true,
 			})
@@ -457,7 +490,7 @@ func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile
 		if !file.curFileRenamed && !file.updateFileMovedToDir {
 			continue
 		}
-		curFilepath := filepath.Join(currentApplicationDir, file.fileName)
+		curFilepath := filepath.Join(currentApplicationDir, file.replacement.FileName)
 		if file.updateFileMovedToDir {
 			err = os.Remove(curFilepath)
 			if err != nil {

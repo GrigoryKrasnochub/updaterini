@@ -18,7 +18,7 @@ func (uR *UpdateResult) deletePrevVersionFiles() (err error) {
 		if !file.curFileRenamed {
 			continue
 		}
-		fPath := filepath.Join(uR.updateDir, file.fileName+oldVersionReplacedFilesExtension)
+		fPath := filepath.Join(uR.updateDir, file.replacement.FileName+oldVersionReplacedFilesExtension)
 		err = os.Remove(fPath)
 		if err != nil {
 			errFiles = append(errFiles, fPath)

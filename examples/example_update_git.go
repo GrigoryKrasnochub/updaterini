@@ -62,13 +62,19 @@ func updateExeFile() {
 	if version != nil {
 		fmt.Println("Start Update!")
 		counter := 0
-		updateResult, err := update.DoUpdate(version, "", func(loadedFilename string) (string, error) {
+		updateResult, err := update.DoUpdate(version, "", func(loadedFilename string) (updaterini.ReplacementFile, error) {
 			if strings.HasSuffix(loadedFilename, ".exe") {
 				exec, _ := os.Executable()
-				return filepath.Base(exec), nil // current exe file will be replaced
+				return updaterini.ReplacementFile{
+					FileName: filepath.Base(exec),
+					Mode: updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
+				}, nil // current exe file will be replaced
 			}
 			counter++
-			return fmt.Sprintf("new file %d", counter), nil
+			return updaterini.ReplacementFile{
+				FileName: fmt.Sprintf("new file %d", counter),
+				Mode:     updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
+			}, nil
 		}, func() error {
 			return nil
 		})
