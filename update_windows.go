@@ -1,3 +1,4 @@
+//go:build windows
 // +build windows
 
 package updaterini
@@ -43,4 +44,9 @@ func (uR *UpdateResult) deletePrevVersionFiles() (err error) {
 		&pI)
 
 	return err
+}
+
+func (rF *updateFile) fillFileOwnerInfo(_ os.FileInfo) {
+	rF.curFileOwner = -1
+	rF.curFileGroup = -1
 }

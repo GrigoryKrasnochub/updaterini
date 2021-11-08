@@ -99,6 +99,8 @@ type updateFile struct {
 	replacement          ReplacementFile // file after replace
 	tmpFileName          string
 	curFileMode          fs.FileMode
+	curFileOwner         int
+	curFileGroup         int
 	curFileRenamed       bool
 	updateFileMovedToDir bool
 }
@@ -198,6 +200,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 			}
 			updateFilesInfo[i].curFileRenamed = true
 			updateFilesInfo[i].curFileMode = fInfo.Mode().Perm()
+			updateFilesInfo[i].fillFileOwnerInfo(fInfo)
 		}
 
 		// move new file to dir
@@ -216,6 +219,10 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 		}
 		err = os.Chmod(curFilepath, fMode)
 		err = rollbackUpdateOnErr(err)
+		if updateFilesInfo[i].curFileRenamed && (updateFilesInfo[i].curFileOwner != -1 || updateFilesInfo[i].curFileGroup != -1) {
+			err = os.Chown(curFilepath, updateFilesInfo[i].curFileOwner, updateFilesInfo[i].curFileGroup)
+			err = rollbackUpdateOnErr(err)
+		}
 		if err != nil {
 			return UpdateResult{}, err
 		}
