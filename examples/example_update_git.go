@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/GrigoryKrasnochub/updaterini"
 )
@@ -14,9 +13,9 @@ func main() {
 }
 
 /*
-	If you are Windows user do go build in examples dir
+	If you are Windows/Linux user do go build in examples dir
 
-	examples.exe would be updated to last release in updaterini_example rep
+	examples would be updated to last release in updaterini_example rep
 */
 func updateExeFile() {
 	appConf, err := updaterini.NewApplicationConfig("1.0.0", []updaterini.Channel{updaterini.NewReleaseChannel(true)}, nil)
@@ -34,8 +33,9 @@ func updateExeFile() {
 				UpdatesMapURL: "http://example/example.json",
 			},
 			&updaterini.UpdateSourceGitRepo{
-				UserName: "GrigoryKrasnochub",
-				RepoName: "updaterini_example",
+				UserName:            "GrigoryKrasnochub",
+				RepoName:            "updaterini_example",
+				PersonalAccessToken: "",
 			},
 		},
 	}
@@ -63,11 +63,11 @@ func updateExeFile() {
 		fmt.Println("Start Update!")
 		counter := 0
 		updateResult, err := update.DoUpdate(version, "", func(loadedFilename string) (updaterini.ReplacementFile, error) {
-			if strings.HasSuffix(loadedFilename, ".exe") {
+			if counter == 0 {
 				exec, _ := os.Executable()
 				return updaterini.ReplacementFile{
 					FileName: filepath.Base(exec),
-					Mode: updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
+					Mode:     updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
 				}, nil // current exe file will be replaced
 			}
 			counter++

@@ -108,6 +108,7 @@ type updateFile struct {
 type UpdateResult struct {
 	updateFilesInfo []updateFile
 	updateDir       string
+	curExeFilePath  string // for Linux rerun after update
 }
 
 /*
@@ -117,11 +118,11 @@ type UpdateResult struct {
 	Do rollback on any trouble
 */
 func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFileInfo func(loadedFilename string) (ReplacementFile, error), doBeforeUpdate func() error) (_ UpdateResult, err error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return UpdateResult{}, err
+	}
 	if curAppDir == "" {
-		exePath, err := os.Executable()
-		if err != nil {
-			return UpdateResult{}, err
-		}
 		curAppDir = filepath.Dir(exePath)
 	}
 	updateTempDir, err := os.MkdirTemp("", "update-*")
@@ -219,6 +220,9 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 		}
 		err = os.Chmod(curFilepath, fMode)
 		err = rollbackUpdateOnErr(err)
+		if err != nil {
+			return UpdateResult{}, err
+		}
 		if updateFilesInfo[i].curFileRenamed && (updateFilesInfo[i].curFileOwner != -1 || updateFilesInfo[i].curFileGroup != -1) {
 			err = os.Chown(curFilepath, updateFilesInfo[i].curFileOwner, updateFilesInfo[i].curFileGroup)
 			err = rollbackUpdateOnErr(err)
@@ -232,6 +236,7 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 	return UpdateResult{
 		updateFilesInfo: updateFilesInfo,
 		updateDir:       curAppDir,
+		curExeFilePath:  exePath,
 	}, nil
 }
 
@@ -307,16 +312,11 @@ func (uR *UpdateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 }
 
 func (uR *UpdateResult) RerunExe(exeArgs []string) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	cmd := exec.Command(executable, exeArgs...)
+	cmd := exec.Command(uR.curExeFilePath, exeArgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
-	err = cmd.Start()
-	return err
+	return cmd.Start()
 }
 
 /*

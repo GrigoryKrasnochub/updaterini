@@ -3,6 +3,11 @@
 
 package updaterini
 
+import (
+	"os"
+	"syscall"
+)
+
 func (uR *UpdateResult) deletePrevVersionFiles() (err error) {
 	return uR.DeletePreviousVersionFiles(DeleteModPureDelete)
 }

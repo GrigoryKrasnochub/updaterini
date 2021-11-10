@@ -45,7 +45,12 @@ func (sGit *UpdateSourceGitRepo) getLoadFileUrl(fileId int) string {
 
 func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg ApplicationConfig) (resultVersions []Version, srcStatus SourceStatus) {
 	srcStatus.Source = sGit
-	resp, err := doGetRequest(sGit.getSourceUrl(), cfg, nil, nil)
+	var customHeaders map[string]string
+	if sGit.PersonalAccessToken != "" {
+		customHeaders = make(map[string]string, 1)
+		customHeaders["Authorization"] = fmt.Sprintf("token %s", sGit.PersonalAccessToken)
+	}
+	resp, err := doGetRequest(sGit.getSourceUrl(), cfg, customHeaders, nil)
 	if err != nil {
 		srcStatus.appendError(err, true)
 		return nil, srcStatus

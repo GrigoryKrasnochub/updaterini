@@ -13,7 +13,7 @@ import (
 const (
 	errorVersionParseErrNumericPreRelease = "version parse err: numeric pre-release branches are unsupported"
 	errorVersionParseErrNoChannel         = "version parse err: can't find channel"
-	errorVersionInvalid                   = "version is invalid"
+	errorVersionInvalid                   = "version is invalid (no files/invalid files names)"
 )
 
 func isVersionFilenameCorrect(filename string, filenameRegex []*regexp.Regexp) bool {
