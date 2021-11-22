@@ -284,7 +284,7 @@ func (uR *UpdateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 		if err != nil {
 			return err
 		}
-		os.Exit(1)
+		os.Exit(0)
 	case DeleteModRerunExec:
 		err := uR.deletePrevVersionFiles()
 		if err != nil {
@@ -305,7 +305,7 @@ func (uR *UpdateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 		if err != nil {
 			return err
 		}
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	return nil
