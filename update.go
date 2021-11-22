@@ -178,9 +178,9 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 		if updateErr == nil {
 			return nil
 		}
-		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, oldVersionReplacedFilesExtension, false)
+		rollbackErr := rollbackUpdatedFiles(curAppDir, updateFilesInfo, oldVersionReplacedFilesExtension, true)
 		if rollbackErr != nil {
-			return rollbackErr
+			return fmt.Errorf("rollback error: %v update error: %v", rollbackErr, updateErr)
 		}
 		return updateErr
 	}
