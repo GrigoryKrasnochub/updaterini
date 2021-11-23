@@ -307,7 +307,6 @@ func (uR *UpdateResult) DeletePreviousVersionFiles(mode DeleteMode, params ...in
 		}
 		os.Exit(0)
 	}
-
 	return nil
 }
 

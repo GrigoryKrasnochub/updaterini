@@ -4,6 +4,7 @@
 package updaterini
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,9 +26,14 @@ func (uR *UpdateResult) deletePrevVersionFiles() (err error) {
 			errFiles = append(errFiles, fPath)
 		}
 	}
+	if len(errFiles) == 0 {
+		return nil
+	}
+
 	var sI syscall.StartupInfo
 	var pI syscall.ProcessInformation
-	argv, tErr := syscall.UTF16PtrFromString(os.Getenv("windir") + "\\system32\\cmd.exe timeout /T 10 /C del " + strings.Join(errFiles, ", "))
+	argv, tErr := syscall.UTF16PtrFromString(fmt.Sprintf(`%s\system32\cmd.exe /C PING -n 11 127.0.0.1>nul & DEL "%s"`,
+		os.Getenv("windir"), strings.Join(errFiles, `", "`))) // 11 equal 10 seconds, 31 equal 30 seconds etc.
 	if tErr != nil {
 		return tErr
 	}
