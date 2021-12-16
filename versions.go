@@ -28,7 +28,8 @@ func isVersionFilenameCorrect(filename string, filenameRegex []*regexp.Regexp) b
 type Version interface {
 	getVersion() semver.Version
 	getChannel() Channel
-	getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error
+	getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string, id int) error) error
+	removeAssets(deleteAsset func(filename string, id int) (bool, error)) error
 	VersionName() string
 	VersionTag() string
 	VersionDescription() string
@@ -176,13 +177,13 @@ func (vG *versionGit) getChannel() Channel {
 	return vG.channel
 }
 
-func (vG *versionGit) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
+func (vG *versionGit) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string, id int) error) error {
 	for _, asset := range vG.data.Assets {
 		reader, err := vG.source.loadSourceFile(cfg, asset.Id)
 		if err != nil {
 			return err
 		}
-		err = processFileContent(reader, asset.Filename)
+		err = processFileContent(reader, asset.Filename, asset.Id)
 		if err != nil {
 			_ = reader.Close()
 			return err
@@ -195,6 +196,22 @@ func (vG *versionGit) getAssetsFilesContent(cfg ApplicationConfig, processFileCo
 	return nil
 }
 
+func (vG *versionGit) removeAssets(deleteAsset func(filename string, id int) (bool, error)) error {
+	i := 0
+	for _, asset := range vG.data.Assets {
+		del, err := deleteAsset(asset.Filename, asset.Id)
+		if err != nil {
+			return err
+		}
+		if del {
+			vG.data.Assets[i] = asset
+			i++
+		}
+	}
+	vG.data.Assets = vG.data.Assets[:i]
+	return nil
+}
+
 type ServData struct {
 	VersionFolderUrl string     `json:"folder_url"` // version folder url
 	Name             string     // release summary
@@ -202,6 +219,7 @@ type ServData struct {
 	Version          string     // version tag
 	Assets           []struct { // version files
 		Filename string // version files filenames, filenames adds to VersionFolderUrl
+		Id       int
 	}
 }
 
@@ -220,6 +238,8 @@ func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer
 		return versionServ{}, fmt.Errorf("%s: %s", data.Version, errorVersionInvalid)
 	}
 	vS.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
+
+	vS.fillAssetsId()
 
 	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
@@ -263,6 +283,12 @@ func (vS *versionServ) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
 	vS.data.Assets = vS.data.Assets[:assetsCounter]
 }
 
+func (vS *versionServ) fillAssetsId() {
+	for i, _ := range vS.data.Assets {
+		vS.data.Assets[i].Id = i
+	}
+}
+
 func (vS *versionServ) getVersion() semver.Version {
 	return vS.version
 }
@@ -271,13 +297,13 @@ func (vS *versionServ) getChannel() Channel {
 	return vS.channel
 }
 
-func (vS *versionServ) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string) error) error {
+func (vS *versionServ) getAssetsFilesContent(cfg ApplicationConfig, processFileContent func(reader io.Reader, filename string, id int) error) error {
 	for _, asset := range vS.data.Assets {
 		reader, err := vS.source.loadSourceFile(cfg, vS.data.VersionFolderUrl, asset.Filename)
 		if err != nil {
 			return err
 		}
-		err = processFileContent(reader, asset.Filename)
+		err = processFileContent(reader, asset.Filename, asset.Id)
 		if err != nil {
 			_ = reader.Close()
 			return err
@@ -287,5 +313,22 @@ func (vS *versionServ) getAssetsFilesContent(cfg ApplicationConfig, processFileC
 			return err
 		}
 	}
+	return nil
+}
+
+func (vS *versionServ) removeAssets(deleteAsset func(filename string, id int) (bool, error)) error {
+	i := 0
+	for _, asset := range vS.data.Assets {
+		del, err := deleteAsset(asset.Filename, asset.Id)
+		if err != nil {
+			return err
+		}
+		if del {
+			continue
+		}
+		vS.data.Assets[i] = asset
+		i++
+	}
+	vS.data.Assets = vS.data.Assets[:i]
 	return nil
 }
