@@ -151,14 +151,12 @@ func (vG *versionGit) VersionDescription() string {
 }
 
 func (vG *versionGit) isValid(filenameRegex []*regexp.Regexp) bool {
-	files := false
 	for _, gitAsset := range vG.data.Assets {
 		if isVersionFilenameCorrect(gitAsset.Filename, filenameRegex) {
-			files = true
-			break
+			return true
 		}
 	}
-	return (vG.source.SkipGitReleaseDraftCheck || !vG.data.Draft) && files // TODO draft releases should be skipped if not checked
+	return false
 }
 
 func (vG *versionGit) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
@@ -199,10 +197,10 @@ func (vG *versionGit) getAssetContentByFilename(cfg ApplicationConfig, filename 
 }
 
 type ServData struct {
-	VersionFolderUrl string     `json:"folder_url"` // version folder url
-	Name             string     // release summary
-	Description      string     // release description
-	Version          string     // version tag
+	VersionFolderUrl string `json:"folder_url"` // version folder url
+	Name             string // release summary
+	Description      string // release description
+	Version          string // version tag
 	Assets           []struct { // version files
 		Filename string // version files filenames, filenames adds to VersionFolderUrl
 	}
