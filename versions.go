@@ -15,6 +15,7 @@ const (
 	errorVersionParseErrNumericPreRelease = "version parse err: numeric pre-release branches are unsupported"
 	errorVersionParseErrNoChannel         = "version parse err: can't find channel"
 	errorVersionInvalid                   = "version is invalid (no files/invalid files names)"
+	errorVersionRepeatingFilenames        = "version has assets with the same name"
 
 	errorAssetNotFoundByFilename = "asset not found by filename"
 )
@@ -124,10 +125,25 @@ func newVersionGit(cfg ApplicationConfig, data gitData, src UpdateSourceGitRepo)
 	vG := versionGit{
 		data: data,
 	}
-	if !vG.isValid(cfg.ValidateFilesNamesRegexes) {
+
+	// remove unused assets, validate version
+	assetsCounter := 0
+	filenames := make(map[string]struct{})
+	for _, asset := range vG.data.Assets {
+		if isVersionFilenameCorrect(asset.Filename, cfg.ValidateFilesNamesRegexes) {
+			vG.data.Assets[assetsCounter] = asset
+			if _, ok := filenames[asset.Filename]; ok {
+				return versionGit{}, fmt.Errorf("%s: %s", data.Version, errorVersionRepeatingFilenames)
+			}
+			filenames[asset.Filename] = struct{}{}
+			assetsCounter++
+		}
+	}
+	vG.data.Assets = vG.data.Assets[:assetsCounter]
+	if assetsCounter == 0 {
 		return versionGit{}, fmt.Errorf("%s: %s", data.Version, errorVersionInvalid)
 	}
-	vG.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
+
 	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
 		return versionGit{}, err
@@ -148,26 +164,6 @@ func (vG *versionGit) VersionTag() string {
 
 func (vG *versionGit) VersionDescription() string {
 	return vG.data.Description
-}
-
-func (vG *versionGit) isValid(filenameRegex []*regexp.Regexp) bool {
-	for _, gitAsset := range vG.data.Assets {
-		if isVersionFilenameCorrect(gitAsset.Filename, filenameRegex) {
-			return true
-		}
-	}
-	return false
-}
-
-func (vG *versionGit) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
-	assetsCounter := 0
-	for _, asset := range vG.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
-			vG.data.Assets[assetsCounter] = asset
-			assetsCounter++
-		}
-	}
-	vG.data.Assets = vG.data.Assets[:assetsCounter]
 }
 
 func (vG *versionGit) getVersion() semver.Version {
@@ -217,10 +213,24 @@ func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer
 	vS := versionServ{
 		data: data,
 	}
-	if !vS.isValid(cfg.ValidateFilesNamesRegexes) {
+
+	// remove unused assets, validate version
+	assetsCounter := 0
+	filenames := make(map[string]struct{})
+	for _, asset := range vS.data.Assets {
+		if isVersionFilenameCorrect(asset.Filename, cfg.ValidateFilesNamesRegexes) {
+			vS.data.Assets[assetsCounter] = asset
+			if _, ok := filenames[asset.Filename]; ok {
+				return versionServ{}, fmt.Errorf("%s: %s", data.Version, errorVersionRepeatingFilenames)
+			}
+			filenames[asset.Filename] = struct{}{}
+			assetsCounter++
+		}
+	}
+	vS.data.Assets = vS.data.Assets[:assetsCounter]
+	if assetsCounter == 0 {
 		return versionServ{}, fmt.Errorf("%s: %s", data.Version, errorVersionInvalid)
 	}
-	vS.cleanUnusedAssets(cfg.ValidateFilesNamesRegexes)
 
 	version, channel, err := parseVersion(cfg, data.Version)
 	if err != nil {
@@ -242,26 +252,6 @@ func (vS *versionServ) VersionTag() string {
 
 func (vS *versionServ) VersionDescription() string {
 	return vS.data.Description
-}
-
-func (vS *versionServ) isValid(filenameRegex []*regexp.Regexp) bool {
-	for _, asset := range vS.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
-			return true
-		}
-	}
-	return false
-}
-
-func (vS *versionServ) cleanUnusedAssets(filenameRegex []*regexp.Regexp) {
-	assetsCounter := 0
-	for _, asset := range vS.data.Assets {
-		if isVersionFilenameCorrect(asset.Filename, filenameRegex) {
-			vS.data.Assets[assetsCounter] = asset
-			assetsCounter++
-		}
-	}
-	vS.data.Assets = vS.data.Assets[:assetsCounter]
 }
 
 func (vS *versionServ) getVersion() semver.Version {
