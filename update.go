@@ -70,21 +70,24 @@ func (uc *UpdateConfig) LoadFilesToDir(ver Version, dirPath string) error {
 		}
 		dirPath = filepath.Dir(exePath)
 	}
-	err := ver.getAssetsFilesContent(uc.ApplicationConfig, func(reader io.Reader, filename string, _ int) (err error) {
-		file, err := os.Create(filepath.Join(dirPath, filename))
+	for _, filename := range ver.getAssetsFilenames() {
+		reader, err := ver.getAssetContentByFilename(uc.ApplicationConfig, filename)
 		if err != nil {
 			return err
 		}
-		defer func() {
-			tempErr := file.Close()
-			if err == nil {
-				err = tempErr
-			}
-		}()
+		file, err := os.Create(filepath.Join(dirPath, filename))
+		if err != nil {
+			_ = reader.Close()
+			return err
+		}
 		_, err = io.Copy(file, reader)
-		return err
-	})
-	return err
+		_ = reader.Close()
+		_ = file.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const ReplacementFileInfoUseDefaultOrExistedFilePerm = 9999
@@ -136,6 +139,9 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 	}
 	defer func() {
 		tempErr := os.RemoveAll(updateTempDir)
+		if err != nil && tempErr != nil {
+			err = fmt.Errorf("%v; remove all assets temp files error: %v", err, tempErr)
+		}
 		if err == nil {
 			err = tempErr
 		}
@@ -143,45 +149,59 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 
 	// load all files
 
-	repFileInfo := make(map[int]ReplacementFile)
-	err = ver.removeAssets(func(filename string, id int) (bool, error) {
-		replacementFileInfo, err := getReplacementFileInfo(filename)
-		if err != nil {
-			return false, err
+	updateFilesInfo := make([]updateFile, 0)
+	for _, filename := range ver.getAssetsFilenames() {
+		replacementFileInfo, err1 := getReplacementFileInfo(filename)
+		if err1 != nil {
+			err = err1
+			return UpdateResult{}, err
 		}
 		if replacementFileInfo.PreventFileLoading {
-			return true, nil
+			continue
 		}
-		repFileInfo[id] = replacementFileInfo
-		return false, nil
-	})
-	if err != nil {
-		return UpdateResult{}, err
+		err = func() (err error) {
+			reader, err := ver.getAssetContentByFilename(uc.ApplicationConfig, filename)
+			if err != nil {
+				return err
+			}
+			defer func() {
+				rCloseErr := reader.Close()
+				if err != nil && rCloseErr != nil {
+					err = fmt.Errorf("%v; close asset reader error: %v", err, rCloseErr)
+				}
+				if err == nil {
+					err = rCloseErr
+				}
+			}()
+			tFile, err := os.CreateTemp(updateTempDir, fmt.Sprintf("update-file-*-%s", filename))
+			if err != nil {
+				return err
+			}
+			defer func() {
+				tCloseErr := tFile.Close()
+				if err != nil && tCloseErr != nil {
+					err = fmt.Errorf("%v; close asset temp file error: %v", err, tCloseErr)
+				}
+				if err == nil {
+					err = tCloseErr
+				}
+			}()
+			_, err = io.Copy(tFile, reader)
+			updateFilesInfo = append(updateFilesInfo, updateFile{
+				replacement:           replacementFileInfo,
+				tmpFileName:           tFile.Name(),
+				curFileRenamed:        false,
+				replacementMovedToDir: false,
+			})
+			return err
+		}()
+		if err != nil {
+			return UpdateResult{}, err
+		}
 	}
 
-	updateFilesInfo := make([]updateFile, 0)
-	err = ver.getAssetsFilesContent(uc.ApplicationConfig, func(reader io.Reader, filename string, id int) (err error) {
-		tFile, err := os.CreateTemp(updateTempDir, fmt.Sprintf("update-file-*-%s", filename))
-		if err != nil {
-			return err
-		}
-		defer func() {
-			tempErr := tFile.Close()
-			if err == nil {
-				err = tempErr
-			}
-		}()
-		_, err = io.Copy(tFile, reader)
-		updateFilesInfo = append(updateFilesInfo, updateFile{
-			replacement:           repFileInfo[id],
-			tmpFileName:           tFile.Name(),
-			curFileRenamed:        false,
-			replacementMovedToDir: false,
-		})
-		return err
-	})
-	repFileInfo = nil
-	if err != nil {
+	if len(updateFilesInfo) == 0 {
+		err = errors.New("update error: no assets for update (loading of all assets was prevented)")
 		return UpdateResult{}, err
 	}
 
@@ -205,10 +225,10 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 
 	for i := range updateFilesInfo {
 		curFilepath := filepath.Join(curAppDir, updateFilesInfo[i].replacement.FileName)
-		fInfo, err := os.Stat(curFilepath)
+		fInfo, err1 := os.Stat(curFilepath)
 
 		// rename old file is exist
-		if err == nil {
+		if err1 == nil {
 			if fInfo.IsDir() {
 				continue
 			}
