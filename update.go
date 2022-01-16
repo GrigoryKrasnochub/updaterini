@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -150,7 +151,9 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 	// load all files
 
 	updateFilesInfo := make([]updateFile, 0)
-	for _, filename := range ver.getAssetsFilenames() {
+	assetsFilenames := ver.getAssetsFilenames()
+	sort.Strings(assetsFilenames)
+	for _, filename := range assetsFilenames {
 		replacementFileInfo, err1 := getReplacementFileInfo(filename)
 		if err1 != nil {
 			err = err1

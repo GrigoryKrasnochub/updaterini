@@ -193,10 +193,10 @@ func (vG *versionGit) getAssetContentByFilename(cfg ApplicationConfig, filename 
 }
 
 type ServData struct {
-	VersionFolderUrl string `json:"folder_url"` // version folder url
-	Name             string // release summary
-	Description      string // release description
-	Version          string // version tag
+	VersionFolderUrl string     `json:"folder_url"` // version folder url
+	Name             string     // release summary
+	Description      string     // release description
+	Version          string     // version tag
 	Assets           []struct { // version files
 		Filename string // version files filenames, filenames adds to VersionFolderUrl
 	}
