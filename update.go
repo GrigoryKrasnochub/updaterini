@@ -1,7 +1,9 @@
 package updaterini
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -525,7 +527,7 @@ func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile
 
 const ZipArchiveExtension = ".zip"
 
-var TarGzArchiveExtensions = map[string]struct{}{".tgz": {}, ".tag.gz": {}}
+var TarGzArchiveExtensions = []string{".tgz", ".tar.gz"}
 
 type versionFilesLoader struct {
 	version                Version
@@ -539,8 +541,18 @@ func (vfl versionFilesLoader) loadVersionFiles() ([]updateFile, error) {
 	assetsFilenames := vfl.version.getAssetsFilenames()
 	archivesFilenames := make([]string, 0)
 	for i, filename := range assetsFilenames {
-		fExt := filepath.Ext(filename)
-		if _, ok := TarGzArchiveExtensions[fExt]; ok || fExt == ZipArchiveExtension {
+		isArchive := false
+		for _, ext := range append(TarGzArchiveExtensions, ZipArchiveExtension) {
+			ok, err := filepath.Match("*"+ext, filename)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				isArchive = true
+				break
+			}
+		}
+		if isArchive {
 			archivesFilenames = append(archivesFilenames, filename)
 			continue
 		}
@@ -552,25 +564,34 @@ func (vfl versionFilesLoader) loadVersionFiles() ([]updateFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	zipUpdateFilesInfo, err := vfl.loadUpdateFilesFromSourceArchives(archivesFilenames)
+	archivesUpdateFilesInfo, err := vfl.loadUpdateFilesFromSourceArchives(archivesFilenames)
 	if err != nil {
 		return nil, err
 	}
-	return append(updateFilesInfo, zipUpdateFilesInfo...), nil
+	return append(updateFilesInfo, archivesUpdateFilesInfo...), nil
 }
 
 func (vfl versionFilesLoader) loadUpdateFilesFromSourceArchives(archivesFilenames []string) ([]updateFile, error) {
+	updateFilesInfo := make([]updateFile, 0)
 	for _, archive := range archivesFilenames {
 		fExt := filepath.Ext(archive)
 		fPath, err := vfl.loadUpdateFileFromSource(archive)
 		if err != nil {
 			return nil, err
 		}
+		var ufi []updateFile
 		if fExt == ZipArchiveExtension {
-			return vfl.unpackZipArchive(fPath)
+			ufi, err = vfl.unpackZipArchive(fPath)
+
+		} else {
+			ufi, err = vfl.unpackTarGzArchive(fPath)
 		}
+		if err != nil {
+			return nil, err
+		}
+		updateFilesInfo = append(updateFilesInfo, ufi...)
 	}
-	return nil, nil
+	return updateFilesInfo, nil
 }
 
 func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFile, error) {
@@ -589,27 +610,27 @@ func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFil
 		}
 	}()
 
-	extractFile := func(file *zip.File) (err error) {
+	for _, file := range zR.File {
 		if file.FileInfo().IsDir() {
-			return
+			continue
 		}
 		fName := filepath.Base(file.Name)
-		replacementFileInfo, err := vfl.getReplacementFileInfo(fName)
-		if err != nil {
-			return
-		}
-		if replacementFileInfo.PreventFileLoading {
-			return
+		replacementFileInfo, err1 := vfl.getReplacementFileInfo(fName)
+		if err1 != nil || replacementFileInfo.PreventFileLoading {
+			err = err1
+			return nil, err
 		}
 		replacementFileInfo.fileDir = filepath.Dir(file.Name)
 
-		zFReader, err := file.Open()
-		if err != nil {
-			return err
+		zFReader, err1 := file.Open()
+		if err1 != nil {
+			err = err1
+			return nil, err
 		}
-		tFName, err := vfl.writeTempFileToDir(zFReader, fName)
-		if err != nil {
-			return err
+		tFName, err1 := vfl.writeTempFileToDir(zFReader, fName)
+		if err1 != nil {
+			err = err1
+			return nil, err
 		}
 		updateFilesInfo = append(updateFilesInfo, updateFile{
 			replacement:           replacementFileInfo,
@@ -617,14 +638,72 @@ func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFil
 			curFileRenamed:        false,
 			replacementMovedToDir: false,
 		})
-		return
 	}
 
-	for _, zFile := range zR.File {
-		err = extractFile(zFile)
-		if err != nil {
+	return updateFilesInfo, nil
+}
+
+func (vfl versionFilesLoader) unpackTarGzArchive(archiveFPath string) ([]updateFile, error) {
+	updateFilesInfo := make([]updateFile, 0)
+	fR, err := os.Open(archiveFPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		fRCloseErr := fR.Close()
+		if err != nil && fRCloseErr != nil {
+			err = fmt.Errorf("%v; targz file close error: %v", err, fRCloseErr)
+		}
+		if err == nil {
+			err = fRCloseErr
+		}
+	}()
+	gzR, err := gzip.NewReader(fR)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		gzRCloseErr := gzR.Close()
+		if err != nil && gzRCloseErr != nil {
+			err = fmt.Errorf("%v; targz archive close error: %v", err, gzRCloseErr)
+		}
+		if err == nil {
+			err = gzRCloseErr
+		}
+	}()
+	tR := tar.NewReader(gzR)
+
+	for {
+		hdr, err1 := tR.Next()
+		if err1 == io.EOF {
+			break
+		}
+		if err1 != nil {
+			err = err1
 			return nil, err
 		}
+		if hdr.FileInfo().IsDir() {
+			continue
+		}
+		fName := filepath.Base(hdr.Name)
+		replacementFileInfo, err1 := vfl.getReplacementFileInfo(fName)
+		if err1 != nil || replacementFileInfo.PreventFileLoading {
+			err = err1
+			return nil, err
+		}
+		replacementFileInfo.fileDir = filepath.Dir(hdr.Name)
+
+		tFName, err1 := vfl.writeTempFileToDir(tR, fName)
+		if err1 != nil {
+			err = err1
+			return nil, err
+		}
+		updateFilesInfo = append(updateFilesInfo, updateFile{
+			replacement:           replacementFileInfo,
+			tmpFileName:           tFName,
+			curFileRenamed:        false,
+			replacementMovedToDir: false,
+		})
 	}
 
 	return updateFilesInfo, nil
@@ -662,16 +741,19 @@ func (vfl versionFilesLoader) loadUpdateFileFromSource(filename string) (string,
 	return vfl.writeTempFileToDir(reader, filename)
 }
 
-func (vfl versionFilesLoader) writeTempFileToDir(reader io.ReadCloser, filename string) (_ string, err error) {
-	defer func() {
-		rCloseErr := reader.Close()
-		if err != nil && rCloseErr != nil {
-			err = fmt.Errorf("%v; close file source reader error: %v", err, rCloseErr)
-		}
-		if err == nil {
-			err = rCloseErr
-		}
-	}()
+func (vfl versionFilesLoader) writeTempFileToDir(readerOrReaderCloser io.Reader, filename string) (_ string, err error) {
+	switch readerOrReaderCloser.(type) {
+	case io.ReadCloser:
+		defer func() {
+			rCloseErr := readerOrReaderCloser.(io.ReadCloser).Close()
+			if err != nil && rCloseErr != nil {
+				err = fmt.Errorf("%v; close file source reader error: %v", err, rCloseErr)
+			}
+			if err == nil {
+				err = rCloseErr
+			}
+		}()
+	}
 
 	var tFile *os.File
 	if !vfl.createOrdinaryFiles {
@@ -695,6 +777,6 @@ func (vfl versionFilesLoader) writeTempFileToDir(reader io.ReadCloser, filename 
 			err = tCloseErr
 		}
 	}()
-	_, err = io.Copy(tFile, reader)
+	_, err = io.Copy(tFile, readerOrReaderCloser)
 	return tFile.Name(), err
 }
