@@ -133,7 +133,7 @@ func newVersionGit(cfg ApplicationConfig, data gitData, src UpdateSourceGitRepo)
 		if isVersionFilenameCorrect(asset.Filename, cfg.ValidateFilesNamesRegexes) {
 			vG.data.Assets[assetsCounter] = asset
 			if _, ok := filenames[asset.Filename]; ok {
-				return versionGit{}, fmt.Errorf("%s: %s", data.Version, errorVersionRepeatingFilenames)
+				return versionGit{}, fmt.Errorf("%s: %s (%s)", data.Version, errorVersionRepeatingFilenames, asset.Filename)
 			}
 			filenames[asset.Filename] = struct{}{}
 			assetsCounter++
@@ -175,7 +175,7 @@ func (vG *versionGit) getChannel() Channel {
 }
 
 func (vG *versionGit) getAssetsFilenames() []string {
-	result := make([]string, len(vG.data.Assets), len(vG.data.Assets))
+	result := make([]string, len(vG.data.Assets))
 	for i, asset := range vG.data.Assets {
 		result[i] = asset.Filename
 	}
@@ -221,7 +221,7 @@ func newVersionServ(cfg ApplicationConfig, data ServData, src UpdateSourceServer
 		if isVersionFilenameCorrect(asset.Filename, cfg.ValidateFilesNamesRegexes) {
 			vS.data.Assets[assetsCounter] = asset
 			if _, ok := filenames[asset.Filename]; ok {
-				return versionServ{}, fmt.Errorf("%s: %s", data.Version, errorVersionRepeatingFilenames)
+				return versionServ{}, fmt.Errorf("%s: %s (%s)", data.Version, errorVersionRepeatingFilenames, asset.Filename)
 			}
 			filenames[asset.Filename] = struct{}{}
 			assetsCounter++
@@ -263,7 +263,7 @@ func (vS *versionServ) getChannel() Channel {
 }
 
 func (vS *versionServ) getAssetsFilenames() []string {
-	result := make([]string, len(vS.data.Assets), len(vS.data.Assets))
+	result := make([]string, len(vS.data.Assets))
 	for i, asset := range vS.data.Assets {
 		result[i] = asset.Filename
 	}
