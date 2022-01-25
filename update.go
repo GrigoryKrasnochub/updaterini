@@ -198,10 +198,10 @@ func (uc *UpdateConfig) DoUpdate(ver Version, curAppDir string, getReplacementFi
 			}
 		}
 		curFilepath := filepath.Join(curDirPath, updateFilesInfo[i].replacement.FileName)
-		fInfo, err1 := os.Stat(curFilepath)
+		fInfo, err := os.Stat(curFilepath)
 
 		// rename old file is exist
-		if err1 == nil {
+		if err == nil {
 			if fInfo.IsDir() {
 				continue
 			}
@@ -512,17 +512,17 @@ func rollbackUpdatedFiles(currentApplicationDir string, updateFiles []updateFile
 		if file.replacementMovedToDir {
 			err = os.Remove(curFilepath)
 			if err != nil {
-				return
+				return err
 			}
 		}
 		if file.curFileRenamed {
 			err = os.Rename(curFilepath+preVersionExtension, curFilepath)
 			if err != nil {
-				return
+				return err
 			}
 		}
 	}
-	return
+	return nil
 }
 
 const ZipArchiveExtension = ".zip"
@@ -590,8 +590,8 @@ func (vfl versionFilesLoader) loadUpdateFilesFromSourceArchives(archivesFilename
 	return updateFilesInfo, nil
 }
 
-func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFile, error) {
-	updateFilesInfo := make([]updateFile, 0)
+func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) (updateFilesInfo []updateFile, err error) {
+	updateFilesInfo = make([]updateFile, 0)
 	zR, err := zip.OpenReader(archiveFPath)
 	if err != nil {
 		return nil, err
@@ -611,9 +611,8 @@ func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFil
 			continue
 		}
 		fName := filepath.Base(file.Name)
-		replacementFileInfo, err1 := vfl.getReplacementFileInfo(fName)
-		if err1 != nil {
-			err = err1
+		replacementFileInfo, err := vfl.getReplacementFileInfo(fName)
+		if err != nil {
 			return nil, err
 		}
 		if replacementFileInfo.PreventFileLoading {
@@ -621,14 +620,12 @@ func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFil
 		}
 		replacementFileInfo.relFileDir = filepath.Dir(file.Name)
 
-		zFReader, err1 := file.Open()
-		if err1 != nil {
-			err = err1
+		zFReader, err := file.Open()
+		if err != nil {
 			return nil, err
 		}
-		tFName, err1 := vfl.writeTempFileToDir(zFReader, fName)
-		if err1 != nil {
-			err = err1
+		tFName, err := vfl.writeTempFileToDir(zFReader, fName)
+		if err != nil {
 			return nil, err
 		}
 		updateFilesInfo = append(updateFilesInfo, updateFile{
@@ -642,8 +639,8 @@ func (vfl versionFilesLoader) unpackZipArchive(archiveFPath string) ([]updateFil
 	return updateFilesInfo, nil
 }
 
-func (vfl versionFilesLoader) unpackTarGzArchive(archiveFPath string) ([]updateFile, error) {
-	updateFilesInfo := make([]updateFile, 0)
+func (vfl versionFilesLoader) unpackTarGzArchive(archiveFPath string) (updateFilesInfo []updateFile, err error) {
+	updateFilesInfo = make([]updateFile, 0)
 	fR, err := os.Open(archiveFPath)
 	if err != nil {
 		return nil, err
@@ -673,21 +670,19 @@ func (vfl versionFilesLoader) unpackTarGzArchive(archiveFPath string) ([]updateF
 	tR := tar.NewReader(gzR)
 
 	for {
-		hdr, err1 := tR.Next()
-		if err1 == io.EOF {
+		hdr, err := tR.Next()
+		if err == io.EOF {
 			break
 		}
-		if err1 != nil {
-			err = err1
+		if err != nil {
 			return nil, err
 		}
 		if hdr.FileInfo().IsDir() {
 			continue
 		}
 		fName := filepath.Base(hdr.Name)
-		replacementFileInfo, err1 := vfl.getReplacementFileInfo(fName)
-		if err1 != nil {
-			err = err1
+		replacementFileInfo, err := vfl.getReplacementFileInfo(fName)
+		if err != nil {
 			return nil, err
 		}
 		if replacementFileInfo.PreventFileLoading {
@@ -695,9 +690,8 @@ func (vfl versionFilesLoader) unpackTarGzArchive(archiveFPath string) ([]updateF
 		}
 		replacementFileInfo.relFileDir = filepath.Dir(hdr.Name)
 
-		tFName, err1 := vfl.writeTempFileToDir(tR, fName)
-		if err1 != nil {
-			err = err1
+		tFName, err := vfl.writeTempFileToDir(tR, fName)
+		if err != nil {
 			return nil, err
 		}
 		updateFilesInfo = append(updateFilesInfo, updateFile{
