@@ -23,10 +23,10 @@ type UpdateSource interface {
 }
 
 type UpdateSourceGitRepo struct {
-	UserName                 string
-	RepoName                 string
-	SkipGitReleaseDraftCheck bool   // on true releases marked as draft won't be skipped
-	PersonalAccessToken      string // ONLY FOR DEBUG PURPOSE
+	UserName            string
+	RepoName            string
+	UseDraftVersions    bool   // on true releases marked as draft load and validate as others
+	PersonalAccessToken string // ONLY FOR DEBUG PURPOSE
 }
 
 func (sGit *UpdateSourceGitRepo) SourceLabel() string {
@@ -68,6 +68,9 @@ func (sGit *UpdateSourceGitRepo) getSourceVersions(cfg ApplicationConfig) (resul
 		return nil, srcStatus
 	}
 	for _, gData := range data {
+		if gData.Draft && !sGit.UseDraftVersions {
+			continue
+		}
 		gVersion, err := newVersionGit(cfg, gData, *sGit)
 		if err != nil {
 			if cfg.ShowPrepareVersionErr {

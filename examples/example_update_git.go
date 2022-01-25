@@ -64,7 +64,8 @@ func updateExeFile() {
 		counter := 0
 		updateResult, err := update.DoUpdate(version, "", func(loadedFilename string) (updaterini.ReplacementFile, error) {
 			file := updaterini.ReplacementFile{
-				Mode: updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
+				Mode:               updaterini.ReplacementFileInfoUseDefaultOrExistedFilePerm,
+				PreventFileLoading: counter > 1, // don't load anything after 2-nd file
 			}
 			if counter == 0 {
 				exec, err := os.Executable()
