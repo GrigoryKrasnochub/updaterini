@@ -16,3 +16,6 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Debug default files
+/bin/serve_update_description_gen/serv_update.json

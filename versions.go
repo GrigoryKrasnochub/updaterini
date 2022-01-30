@@ -76,8 +76,7 @@ func prepareVersionString(version string) string {
 }
 
 func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channel, error) {
-	version = prepareVersionString(version)
-	parsedVersion, err := semver.Parse(version)
+	parsedVersion, err := ParseVersion(version)
 	if err != nil {
 		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, err)
 	}
@@ -88,15 +87,27 @@ func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channe
 		}
 		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
 	}
-	if parsedVersion.Pre[0].IsNum {
-		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNumericPreRelease)
-	}
 	for _, channel := range cfg.channels {
 		if channel.name == parsedVersion.Pre[0].VersionStr {
 			return parsedVersion, channel, nil
 		}
 	}
 	return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
+}
+
+func ParseVersion(version string) (semver.Version, error) {
+	version = prepareVersionString(version)
+	parsedVersion, err := semver.Parse(version)
+	if err != nil {
+		return parsedVersion, fmt.Errorf("%s: %s", version, err)
+	}
+	if len(parsedVersion.Pre) == 0 {
+		return parsedVersion, nil
+	}
+	if parsedVersion.Pre[0].IsNum {
+		return parsedVersion, fmt.Errorf("%s: %s", version, errorVersionParseErrNumericPreRelease)
+	}
+	return parsedVersion, nil
 }
 
 type gitData struct {
