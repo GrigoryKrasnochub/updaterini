@@ -137,7 +137,6 @@ func (vr verReader) readVersionsDir() ([]servExtData, error) {
 		if err != nil {
 			return nil, err
 		}
-		sData.Version = version.Name()
 		sData.version = pVer
 		versionsSDData = append(versionsSDData, sData)
 	}

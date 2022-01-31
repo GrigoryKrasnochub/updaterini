@@ -1,4 +1,4 @@
-module serve_update_description_gen
+module github.com/GrigoryKrasnochub/updaterini/cmd/serv_upd_gen
 
 go 1.17
 
