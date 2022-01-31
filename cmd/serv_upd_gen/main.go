@@ -15,9 +15,9 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-const DescriptionNameSeparator = "==============="
-const DescriptionFilename = "description.txt"
-const OutputFilename = "serv_update.json"
+const descriptionNameSeparator = "====="
+const descriptionFilename = "description.txt"
+const outputFilename = "serv_update.json"
 
 func main() {
 	app := &cli.App{
@@ -33,14 +33,14 @@ func main() {
 			&cli.StringFlag{
 				Name:    "descFilename",
 				Aliases: []string{"d"},
-				Value:   DescriptionFilename,
+				Value:   descriptionFilename,
 				Usage: "filename in version folder, that contains version description, " +
 					"will be parsed and skipped in assets. Parsed description will be used in result json file",
 			},
 			&cli.StringFlag{
 				Name:    "descNameSeparator",
 				Aliases: []string{"s"},
-				Value:   DescriptionNameSeparator,
+				Value:   descriptionNameSeparator,
 				Usage:   "separator that separate version name from version description in version description file",
 			},
 			&cli.PathFlag{
@@ -63,7 +63,7 @@ func main() {
 				if err != nil {
 					return err
 				}
-				outputFilepath = filepath.Join(outputFilepath, OutputFilename)
+				outputFilepath = filepath.Join(outputFilepath, outputFilename)
 			}
 			vReader := verReader{
 				versionsDir:              context.Path("inputDir"),
