@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -14,9 +15,9 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-const descriptionNameSeparator = "\\\\//"
-const descriptionFilename = "description.txt"
-const outputFilename = "serv_update.json"
+const DescriptionNameSeparator = "==============="
+const DescriptionFilename = "description.txt"
+const OutputFilename = "serv_update.json"
 
 func main() {
 	app := &cli.App{
@@ -32,14 +33,14 @@ func main() {
 			&cli.StringFlag{
 				Name:    "descFilename",
 				Aliases: []string{"d"},
-				Value:   descriptionFilename,
+				Value:   DescriptionFilename,
 				Usage: "filename in version folder, that contains version description, " +
 					"will be parsed and skipped in assets. Parsed description will be used in result json file",
 			},
 			&cli.StringFlag{
 				Name:    "descNameSeparator",
 				Aliases: []string{"s"},
-				Value:   descriptionNameSeparator,
+				Value:   DescriptionNameSeparator,
 				Usage:   "separator that separate version name from version description in version description file",
 			},
 			&cli.PathFlag{
@@ -58,11 +59,11 @@ func main() {
 			var err error
 			outputFilepath := context.Path("outputFilepath")
 			if outputFilepath == "" {
-				outputFilepath, err = os.Executable()
+				outputFilepath, err = os.Getwd()
 				if err != nil {
 					return err
 				}
-				outputFilepath = filepath.Join(filepath.Dir(outputFilepath), outputFilename)
+				outputFilepath = filepath.Join(outputFilepath, OutputFilename)
 			}
 			vReader := verReader{
 				versionsDir:              context.Path("inputDir"),
@@ -174,19 +175,8 @@ func (vr verReader) readVersionDescriptionFile(filepath string) (name string, de
 	if err != nil {
 		return "", "", fmt.Errorf("reading description error: %v", err)
 	}
-	descRune := []rune(string(desc))
-	delimRune := []rune(vr.descriptionNameSeparator)
-	delimLen := len(delimRune)
-	delimSymCounter := 0
-	lastDelimIndex := 0
-	for i, sym := range descRune {
-		if sym == delimRune[delimSymCounter] {
-			delimSymCounter++
-			lastDelimIndex = i
-			if delimSymCounter == delimLen {
-				return string(descRune[0 : lastDelimIndex-delimLen+1]), string(descRune[lastDelimIndex+1:]), nil
-			}
-		}
+	if delimIndex := bytes.Index(desc, []byte(vr.descriptionNameSeparator)); delimIndex != -1 {
+		return string(desc[0:delimIndex]), string(desc[delimIndex+len(vr.descriptionNameSeparator):]), nil
 	}
-	return "", string(descRune), nil
+	return "", string(desc), nil
 }
