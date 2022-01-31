@@ -3,7 +3,7 @@ module github.com/GrigoryKrasnochub/updaterini/cmd/serv_upd_gen
 go 1.17
 
 require (
-	github.com/GrigoryKrasnochub/updaterini v0.0.0-20220125215431-d01eb0c75d50
+	github.com/GrigoryKrasnochub/updaterini v0.0.0-20220131215023-6409eefc76ac
 	github.com/blang/semver/v4 v4.0.0
 	github.com/urfave/cli/v2 v2.3.0
 )

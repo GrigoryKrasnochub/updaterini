@@ -71,10 +71,6 @@ func prepareVersionForComparison(version semver.Version) semver.Version {
 	return version
 }
 
-func prepareVersionString(version string) string {
-	return strings.TrimLeft(strings.TrimSpace(version), "v")
-}
-
 func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channel, error) {
 	parsedVersion, err := ParseVersion(version)
 	if err != nil {
@@ -96,7 +92,7 @@ func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channe
 }
 
 func ParseVersion(version string) (semver.Version, error) {
-	version = prepareVersionString(version)
+	version = strings.TrimLeft(strings.TrimSpace(version), "v")
 	parsedVersion, err := semver.Parse(version)
 	if err != nil {
 		return parsedVersion, fmt.Errorf("%s: %s", version, err)
