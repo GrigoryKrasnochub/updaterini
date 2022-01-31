@@ -6,9 +6,11 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/GrigoryKrasnochub/updaterini"
+	"github.com/blang/semver/v4"
 	"github.com/urfave/cli/v2"
 )
 
@@ -71,6 +73,15 @@ func main() {
 			if err != nil {
 				return err
 			}
+
+			// sort versions asc
+
+			sort.SliceStable(versions, func(i, j int) bool {
+				return versions[i].version.LT(versions[i].version)
+			})
+
+			// fullfill versions info
+
 			baseUrl := context.String("url")
 			if !strings.HasSuffix(baseUrl, "/") {
 				baseUrl += "/"
@@ -78,6 +89,7 @@ func main() {
 			for i, ver := range versions {
 				versions[i].VersionFolderUrl = baseUrl + ver.Version + "/"
 			}
+
 			jsonVersions, err := json.Marshal(versions)
 			if err != nil {
 				return err
@@ -102,9 +114,14 @@ type verReader struct {
 	descriptionNameSeparator string
 }
 
-func (vr verReader) readVersionsDir() ([]updaterini.ServData, error) {
+type servExtData struct {
+	updaterini.ServData
+	version semver.Version
+}
+
+func (vr verReader) readVersionsDir() ([]servExtData, error) {
 	versions, err := ioutil.ReadDir(vr.versionsDir)
-	versionsSDData := make([]updaterini.ServData, 0)
+	versionsSDData := make([]servExtData, 0)
 	if err != nil {
 		return nil, fmt.Errorf("read versions dir error: %v", err)
 	}
@@ -112,7 +129,7 @@ func (vr verReader) readVersionsDir() ([]updaterini.ServData, error) {
 		if !version.IsDir() {
 			continue
 		}
-		_, err = updaterini.ParseVersion(version.Name())
+		pVer, err := updaterini.ParseVersion(version.Name())
 		if err != nil {
 			return nil, fmt.Errorf("parse version folder name error (incorrect version): %v", err)
 		}
@@ -121,13 +138,14 @@ func (vr verReader) readVersionsDir() ([]updaterini.ServData, error) {
 			return nil, err
 		}
 		sData.Version = version.Name()
+		sData.version = pVer
 		versionsSDData = append(versionsSDData, sData)
 	}
 	return versionsSDData, nil
 }
 
-func (vr verReader) readVersionDir(vDirPath string) (updaterini.ServData, error) {
-	sData := updaterini.ServData{}
+func (vr verReader) readVersionDir(vDirPath string) (servExtData, error) {
+	sData := servExtData{}
 	assets, err := ioutil.ReadDir(vDirPath)
 	if err != nil {
 		return sData, fmt.Errorf("read version folder error: %v", err)
@@ -145,7 +163,9 @@ func (vr verReader) readVersionDir(vDirPath string) (updaterini.ServData, error)
 			sData.Description = strings.TrimSpace(description)
 		}
 		sData.Version = filepath.Base(vDirPath)
-		sData.Assets = append(sData.Assets, struct{ Filename string }{Filename: asset.Name()})
+		sData.Assets = append(sData.Assets, struct {
+			Filename string "json:\"filename\""
+		}{Filename: asset.Name()})
 	}
 	return sData, nil
 }

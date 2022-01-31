@@ -18,4 +18,4 @@
 # vendor/
 
 # Debug default files
-/bin/serve_update_description_gen/serv_update.json
+/cmd/serve_update_description_gen/serv_update.json
