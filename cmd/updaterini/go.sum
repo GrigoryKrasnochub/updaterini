@@ -1,6 +1,6 @@
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/GrigoryKrasnochub/updaterini v0.0.0-20220131215023-6409eefc76ac h1:AuOFeifQob2Ehr+fI7sudyUGAeATyiBuaCA0tSxoPbs=
-github.com/GrigoryKrasnochub/updaterini v0.0.0-20220131215023-6409eefc76ac/go.mod h1:w+8blQZCZzGmJGXqmXbeSOsUOF6LqyeqckxSiZah7RI=
+github.com/GrigoryKrasnochub/updaterini v0.0.0-20220131222038-d8935f87cd28 h1:0xnhaIveclXSePWwvdlcyV2dSGic7De3P9z+k9ndwcE=
+github.com/GrigoryKrasnochub/updaterini v0.0.0-20220131222038-d8935f87cd28/go.mod h1:w+8blQZCZzGmJGXqmXbeSOsUOF6LqyeqckxSiZah7RI=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
 github.com/blang/semver/v4 v4.0.0/go.mod h1:IbckMUScFkM3pff0VJDNKRiT6TG/YpiHIM2yvyW5YoQ=
 github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d h1:U+s90UTSYgptZMwQh2aRr3LuazLJIa+Pg3Kc1ylSYVY=
