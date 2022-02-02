@@ -71,13 +71,8 @@ func prepareVersionForComparison(version semver.Version) semver.Version {
 	return version
 }
 
-func prepareVersionString(version string) string {
-	return strings.TrimLeft(strings.TrimSpace(version), "v")
-}
-
 func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channel, error) {
-	version = prepareVersionString(version)
-	parsedVersion, err := semver.Parse(version)
+	parsedVersion, err := ParseVersion(version)
 	if err != nil {
 		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, err)
 	}
@@ -88,15 +83,27 @@ func parseVersion(cfg ApplicationConfig, version string) (semver.Version, Channe
 		}
 		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
 	}
-	if parsedVersion.Pre[0].IsNum {
-		return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNumericPreRelease)
-	}
 	for _, channel := range cfg.channels {
 		if channel.name == parsedVersion.Pre[0].VersionStr {
 			return parsedVersion, channel, nil
 		}
 	}
 	return parsedVersion, Channel{}, fmt.Errorf("%s: %s", version, errorVersionParseErrNoChannel)
+}
+
+func ParseVersion(version string) (semver.Version, error) {
+	version = strings.TrimLeft(strings.TrimSpace(version), "v")
+	parsedVersion, err := semver.Parse(version)
+	if err != nil {
+		return parsedVersion, fmt.Errorf("%s: %s", version, err)
+	}
+	if len(parsedVersion.Pre) == 0 {
+		return parsedVersion, nil
+	}
+	if parsedVersion.Pre[0].IsNum {
+		return parsedVersion, fmt.Errorf("%s: %s", version, errorVersionParseErrNumericPreRelease)
+	}
+	return parsedVersion, nil
 }
 
 type gitData struct {
@@ -193,13 +200,13 @@ func (vG *versionGit) getAssetContentByFilename(cfg ApplicationConfig, filename 
 }
 
 type ServData struct {
-	VersionFolderUrl string     `json:"folder_url"` // version folder url
-	Name             string     // release summary
-	Description      string     // release description
-	Version          string     // version tag
-	Assets           []struct { // version files
-		Filename string // version files filenames, filenames adds to VersionFolderUrl
-	}
+	VersionFolderUrl string `json:"folder_url"`  // version folder url
+	Name             string `json:"name"`        // release summary
+	Description      string `json:"description"` // release description
+	Version          string `json:"version"`     // version tag
+	Assets           []struct {
+		Filename string `json:"filename"` // version files filenames, filenames adds to VersionFolderUrl
+	} `json:"assets"` // version files
 }
 
 type versionServ struct {
