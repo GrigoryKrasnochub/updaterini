@@ -64,6 +64,7 @@ func (vr verReader) readVersionDir(vDirPath string) (servExtData, error) {
 			}
 			sData.Name = strings.TrimSpace(name)
 			sData.Description = strings.TrimSpace(description)
+			continue
 		}
 		sData.Version = filepath.Base(vDirPath)
 		sData.Assets = append(sData.Assets, struct {
