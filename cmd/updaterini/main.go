@@ -75,7 +75,7 @@ func main() {
 						return versions[i].version.LT(versions[i].version)
 					})
 
-					// fullfill versions info
+					// fulfill versions info
 
 					baseUrl := context.String("url")
 					if !strings.HasSuffix(baseUrl, "/") {
